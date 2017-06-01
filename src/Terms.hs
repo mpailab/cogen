@@ -1,12 +1,7 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ExplicitForAll #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ExistentialQuantification #-}
 
 module Terms
-    ( Term(..), TermSym, TermReference(..), ITerm(..), TermElement(..),
+    ( Term(..), TermSym, TermReference(..), ITerm(..), TermElement(..), (&),
     replaceTerms, findMatches, hasMatch, parentRefs
     )
 where
@@ -18,48 +13,39 @@ where
       [] -> 0
       x:xs -> f x + sumf f xs
 
-  -- | term with arbitrary type @f@ of functional symbols and type @v@ of variable symbols
-  data Term f v
-      = Const f          -- ^ constant node (may be used instead of function node with 0 arguments)
-      | Var v            -- ^ variable node
-      | Fun f [Term f v] -- ^ function node with argument list. Each argument is also a term.
-      deriving (Eq, Ord)
-
   -- | Default type of functional and variable symbols
   type TermSym = String
 
-  -- | 'STerm' is short name for term with default type of functional and variable symbols
-  type STerm = Term TermSym TermSym
+  -- | term with arbitrary type @f@ of functional symbols and type @v@ of variable symbols
+  data Term
+      = Const TermSym          -- ^ constant node (may be used instead of function node with 0 arguments)
+      | Var TermSym            -- ^ variable node
+      | Fun TermSym [Term] -- ^ function node with argument list. Each argument is also a term.
+      deriving (Eq, Read, Ord)
 
   -- | 'TermReference' specifies subterm with position in the whole term.
   --    stores current subterm and sequence of parents from current subterm parent to term root
-  data TermReference f v = TRef [Term f v]
+  data TermReference = TRef [Term]
       deriving (Show, Eq, Ord)
-
-  -- | 'STermReference' is short name for 'TermReference' with default type of functional and variable symbols
-  type STermReference = TermReference TermSym TermSym
 
   --termRefList ref = case ref of TRef x -> x
 
   -- | represents term element : functional symbol of type @f@ or variable of type @v@
-  data TermElement f v = TermVar v | TermSym f
-      deriving (Show, Eq, Ord)
-
-  -- | short name for term element with default types of functional and variable symbols
-  type STermElement = TermElement TermSym TermSym
+  data TermElement = TermVar TermSym | TermSym TermSym
+      deriving (Show, Read, Eq, Ord)
 
   -- | 'ITerm' represents interface of object which is similar to STerm.
   class ITerm t where
-      header :: t -> STermElement          -- ^ returns term header
-      subterms :: t -> [STerm]             -- ^ enumerates subterms of current term
-      subtermRefs :: t -> [STermReference] -- ^ enumerate references to subterms of current term
-      operands :: t -> [STerm]             -- ^ enumerate operands of current term
-      operandRefs :: t -> [STermReference] -- ^ enumerate references to operands of current term
-      term :: t-> STerm                    -- ^ converts given object to 'STerm' type
-      termref :: t -> STermReference       -- ^ returns reference to current term or subterm
+      header :: t -> TermElement          -- ^ returns term header
+      subterms :: t -> [Term]             -- ^ enumerates subterms of current term
+      subtermRefs :: t -> [TermReference] -- ^ enumerate references to subterms of current term
+      operands :: t -> [Term]             -- ^ enumerate operands of current term
+      operandRefs :: t -> [TermReference] -- ^ enumerate references to operands of current term
+      term :: t-> Term                    -- ^ converts given object to 'STerm' type
+      termref :: t -> TermReference       -- ^ returns reference to current term or subterm
 
   -- | 'STerm' represents term itself
-  instance ITerm STerm where
+  instance ITerm Term where
       subterms t = case t of
           Fun f l -> t : concatMap subterms l
           _ -> [t]
@@ -78,7 +64,7 @@ where
       termref t = TRef [t]
 
   -- | 'STermReference' --- ссылка на подтерм; интерфейс 'ITerm' осуществляет работу с этим подтермом.
-  instance ITerm STermReference where
+  instance ITerm TermReference where
       subterms (TRef (t:ts)) = subterms t
       subterms (TRef []) = []
 
@@ -94,7 +80,7 @@ where
       termref t = t
 
   -- | returns list of parent subterms of current subterm
-  parentRefs :: TermReference f v -> [Term f v]
+  parentRefs :: TermReference -> [Term]
   parentRefs (TRef ref) = tail ref --ts:parentRefs (TRef (s:ts))
 
   class (Show s) => LogSymbol s where
@@ -110,7 +96,7 @@ where
   instance LogSymbol String where
      str s = s
 
-  instance (LogSymbol f, LogSymbol v) => Show (Term f v) where
+  instance Show Term where
       --show :: Show f => Show v => (Term f v -> String)
       show (Var v) = str v
       show (Fun f l) = str f ++ "(" ++ sumstr [show x | x<-l] ++ ")"
@@ -120,7 +106,7 @@ where
               sumstr (x:y:l) = x++","++sumstr (y:l)
 
   infixr 5 &
-  (&) :: f -> [Term f v] -> Term f v
+  (&) :: TermSym -> [Term] -> Term
   f&[] = Const f
   f&l = Fun f l
 
@@ -147,7 +133,7 @@ where
   --   If term @trm@ can be obtained from term @patt@ by some substitution x1->t1,...,xn->tn,
   --     then returns 'Just' [(x1,t1),...,(xn,tn)].
   --   Otherwise returns 'Nothing'
-  hasMatch :: (Ord f, Ord v, Ord v1) => Term f v -> Term f v1 -> Maybe [(v1, Term f v)]
+  hasMatch :: Term -> Term -> Maybe [(TermSym, Term)]
 
   hasMatch trm patt = case r of
       (True, l) -> if isMapping sl then Just sl else Nothing where sl = rmdups l
@@ -165,7 +151,7 @@ where
           isMapping _ = True
 
   -- | 'findMatches' @t@ @pattern@ enumerates all subterms of term @t@ that matches given pattern
-  findMatches :: STerm -> STerm -> [(STerm, [(TermSym, STerm)])]
+  findMatches :: Term -> Term -> [(Term, [(TermSym, Term)])]
   findMatches trm patt = concatMap m (subterms trm)
       where
           m x = case hasMatch x patt of

@@ -1,15 +1,15 @@
 module Compiler.Tree
     (
-      Tree(..),
-      save, load
+      Tree(..)
     ) where
 
 import Terms
 
-type Edge = [STerm]
-type TerminalNode = [STerm]
+type Edge = ([Term],Tree)
+type TerminalNode = [Term]
 
 data Tree =
     Terminal TerminalNode
-  | Switch STerm [Edge]
+  | Switch Term [Edge]
   | Branch [Edge]
+  deriving(Read, Show)
