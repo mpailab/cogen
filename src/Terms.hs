@@ -8,6 +8,7 @@ where
   import Data.List
   import Data.String
   import Control.Monad
+  import qualified Control.Arrow as Arrow
 
   sumf f l = case l of
       [] -> 0
@@ -21,7 +22,7 @@ where
       = Const TermSym          -- ^ constant node (may be used instead of function node with 0 arguments)
       | Var TermSym            -- ^ variable node
       | Fun TermSym [Term] -- ^ function node with argument list. Each argument is also a term.
-      deriving (Eq, Read, Ord)
+      deriving (Eq, Ord)
 
   -- | 'TermReference' specifies subterm with position in the whole term.
   --    stores current subterm and sequence of parents from current subterm parent to term root
@@ -44,7 +45,7 @@ where
       term :: t-> Term                    -- ^ converts given object to 'STerm' type
       termref :: t -> TermReference       -- ^ returns reference to current term or subterm
 
-  -- | 'STerm' represents term itself
+  -- | 'Term' represents term itself
   instance ITerm Term where
       subterms t = case t of
           Fun f l -> t : concatMap subterms l
@@ -63,7 +64,7 @@ where
       term t = t
       termref t = TRef [t]
 
-  -- | 'STermReference' --- ссылка на подтерм; интерфейс 'ITerm' осуществляет работу с этим подтермом.
+  -- | 'TermReference' --- ссылка на подтерм; интерфейс 'ITerm' осуществляет работу с этим подтермом.
   instance ITerm TermReference where
       subterms (TRef (t:ts)) = subterms t
       subterms (TRef []) = []
@@ -87,8 +88,8 @@ where
      str :: s -> String
      str = show
 
-  --instance LogSymbol Int where
-  --   str = show
+  instance LogSymbol Int where
+     str = show
 
   instance LogSymbol Char where
      str c = [c]
@@ -98,12 +99,26 @@ where
 
   instance Show Term where
       --show :: Show f => Show v => (Term f v -> String)
-      show (Var v) = str v
-      show (Fun f l) = str f ++ "(" ++ sumstr [show x | x<-l] ++ ")"
+      show (Var v) = '$':str v
+      show (Const c) = str c
+      show (Fun f l) = str f ++ "[" ++ sumstr [show x | x<-l] ++ "]"
            where
               sumstr [] = ""
               sumstr [a] = a
               sumstr (x:y:l) = x++","++sumstr (y:l)
+
+  instance Read Term where
+      --show :: Show f => Show v => (Term f v -> String)
+        readsPrec _ str =
+            case lex str of
+                 ("$",r):_   -> [Arrow.first Var v | v <- lex r]
+                 (s,'[':r):_ -> [Arrow.first (Fun (rmq s)) lx | lx <- reads ('[':r)]
+                 (s,r):_     -> [(Const (rmq s),r)]
+                 _ -> []
+            where
+                rmq s = case s of
+                    '"':w -> init w
+                    x     -> x
 
   infixr 5 &
   (&) :: TermSym -> [Term] -> Term

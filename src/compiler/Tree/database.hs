@@ -24,7 +24,7 @@ initialize name = do
      Left _ -> return (Db Map.empty)
      Right contents -> return (read contents)
 finalize :: String -> Database -> IO ()
-finalize str db = writeFile str (show db)
+finalize str db = writeFile str $! show db
 
 load :: Database -> TermSym -> (Database,Tree)
 save :: Database -> TermSym -> Tree -> Database
