@@ -1,0 +1,11 @@
+.stack-work
+dist
+cabal-dev
+*.o
+*.hi
+*.chi
+*.chs.h
+*~
+Setup
+TAGS
+tags

@@ -5,11 +5,11 @@ module Compiler.Tree.Database
       initialize, load, save, finalize
     ) where
 
-import Compiler.Tree
-import Terms
-import Data.Map (Map,(!))
-import Control.Exception
-import qualified Data.Map as Map
+import           Compiler.Tree
+import           Control.Exception
+import           Data.Map          (Map, (!))
+import qualified Data.Map          as Map
+import           Terms
 
 type DatabaseItem = Tree
 
@@ -21,7 +21,7 @@ initialize :: String -> IO Database
 initialize name = do
   contents::Either IOError String <- try $ readFile name
   case contents of
-     Left _ -> return (Db Map.empty)
+     Left _         -> return (Db Map.empty)
      Right contents -> return (read contents)
 finalize :: String -> Database -> IO ()
 finalize str db = writeFile str $! show db
