@@ -7,9 +7,8 @@ import           System.Directory
 -- Internal imports
 import           Compiler.Tree
 import           Compiler.Tree.Database
-import           Lib
 import           Rule
-import           Terms
+import           Term
 
 -- | Test implementation
 test :: Integer -> IO Bool
