@@ -23,7 +23,7 @@ import           Term
 -- Inference rule
 data Rule = Rule
   {
-    symbol      :: TermSym,
+    symbol      :: LSymbol,
     theorem     :: Term,
     header      :: Term,
     filters     :: [Term],

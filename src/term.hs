@@ -15,7 +15,7 @@ Portability : POSIX
 module Term
     (
       -- exports
-      Term(..), TermSym, TermReference(..), ITerm(..), TermElement(..), (&),
+      Term(..), LSymbol, TermReference(..), ITerm(..), TermElement(..), (&),
       replaceTerms, findMatches, hasMatch, parentRefs
     )
 where
@@ -31,13 +31,13 @@ sumf f l = case l of
   x:xs -> f x + sumf f xs
 
 -- | Default type of functional and variable symbols
-type TermSym = String
+type LSymbol = String
 
 -- | term with arbitrary type @f@ of functional symbols and type @v@ of variable symbols
 data Term
-  = Const TermSym      -- ^ constant node (may be used instead of function node with 0 arguments)
-  | Var TermSym        -- ^ variable node
-  | Fun TermSym [Term] -- ^ function node with argument list. Each argument is also a term.
+  = Const LSymbol      -- ^ constant node (may be used instead of function node with 0 arguments)
+  | Var LSymbol        -- ^ variable node
+  | Fun LSymbol [Term] -- ^ function node with argument list. Each argument is also a term.
   deriving (Eq, Ord)
 
 -- | 'TermReference' specifies subterm with position in the whole term.
@@ -46,8 +46,8 @@ newtype TermReference = TRef [Term] deriving (Show, Eq, Ord)
 
 -- | represents term element : functional symbol of type @f@ or variable of type @v@
 data TermElement
-  = TermVar TermSym
-  | TermSym TermSym
+  = TermVar LSymbol
+  | LSymbol LSymbol
   deriving (Show, Read, Eq, Ord)
 
 -- | 'ITerm' represents interface of object which is similar to STerm.
@@ -66,8 +66,8 @@ instance ITerm Term where
   -- Get header of term
   header term = case term of
     Var v   -> TermVar v
-    Const c -> TermSym c
-    Fun f l -> TermSym f
+    Const c -> LSymbol c
+    Fun f l -> LSymbol f
 
   -- Get subterms list of term
   subterms t = case t of
@@ -162,7 +162,7 @@ instance Read Term where
           x     -> x
 
 infixr 5 &
-(&) :: TermSym -> [Term] -> Term
+(&) :: LSymbol -> [Term] -> Term
 f&[] = Const f
 f&l  = Fun f l
 
@@ -189,7 +189,7 @@ rmdups = map head . group . sort
 --   If term @trm@ can be obtained from term @patt@ by some substitution x1->t1,...,xn->tn,
 --     then returns 'Just' [(x1,t1),...,(xn,tn)].
 --   Otherwise returns 'Nothing'
-hasMatch :: Term -> Term -> Maybe [(TermSym, Term)]
+hasMatch :: Term -> Term -> Maybe [(LSymbol, Term)]
 
 hasMatch trm patt = case r of
   (True, l) -> if isMapping sl then Just sl else Nothing where sl = rmdups l
@@ -207,7 +207,7 @@ hasMatch trm patt = case r of
     isMapping _ = True
 
 -- | 'findMatches' @t@ @pattern@ enumerates all subterms of term @t@ that matches given pattern
-findMatches :: Term -> Term -> [(Term, [(TermSym, Term)])]
+findMatches :: Term -> Term -> [(Term, [(LSymbol, Term)])]
 findMatches trm patt = concatMap m (subterms trm)
   where
     m x = case hasMatch x patt of
