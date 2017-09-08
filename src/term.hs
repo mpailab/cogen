@@ -15,30 +15,32 @@ Portability : POSIX
 module Term
     (
       -- exports
-      Term(..), LSymbol, TermReference(..), ITerm(..), TermElement(..), (&),
+      Term, TermTemplate(..), LSymbol, TermReference(..), ITerm(..), TermElement(..), elementName, (&),
       replaceTerms, findMatches, hasMatch, parentRefs
     )
 where
 
 -- External imports
 import qualified Control.Arrow as Arrow
-import           Control.Monad
+--import           Control.Monad
 import           Data.List
-import           Data.String
+--import           Data.String
 
-sumf f l = case l of
-  []   -> 0
-  x:xs -> f x + sumf f xs
 
 -- | Default type of functional and variable symbols
 type LSymbol = String
 
--- | term with arbitrary type @f@ of functional symbols and type @v@ of variable symbols
-data Term
-  = Const LSymbol      -- ^ constant node (may be used instead of function node with 0 arguments)
-  | Var LSymbol        -- ^ variable node
-  | Fun LSymbol [Term] -- ^ function node with argument list. Each argument is also a term.
+-- | term with arbitrary type @f@ of functional symbols and variable symbols
+-- | template is necessary for type classes that require a type parameter like Foldable
+data TermTemplate f
+  = Const f                -- ^ constant node (may be used instead of function node with 0 arguments)
+  | Var f                  -- ^ variable node
+  | Fun f [TermTemplate f] -- ^ function node with argument list. Each argument is also a term.
   deriving (Eq, Ord)
+
+
+-- | term with arbitrary functional symbols and variable symbols of type LSymbol
+type Term = TermTemplate LSymbol
 
 -- | 'TermReference' specifies subterm with position in the whole term.
 --    stores current subterm and sequence of parents from current subterm parent to term root
@@ -49,6 +51,12 @@ data TermElement
   = TermVar LSymbol
   | LSymbol LSymbol
   deriving (Show, Read, Eq, Ord)
+
+-- | returns name of variable or symbol
+elementName :: TermElement -> LSymbol
+elementName te = case te of
+  TermVar var -> var
+  LSymbol sym -> sym
 
 -- | 'ITerm' represents interface of object which is similar to STerm.
 class ITerm t where
@@ -64,27 +72,27 @@ class ITerm t where
 instance ITerm Term where
 
   -- Get header of term
-  header term = case term of
+  header trm = case trm of
     Var v   -> TermVar v
     Const c -> LSymbol c
-    Fun f l -> LSymbol f
+    Fun f _ -> LSymbol f
 
   -- Get subterms list of term
   subterms t = case t of
-    Fun f l -> t : concatMap subterms l
+    Fun _ l -> t : concatMap subterms l
     _       -> [t]
 
   -- Get list of subterm's references of term
   subtermRefs t = subtermRefs (TRef [t])
 
   -- Get operands list of term
-  operands term = case term of
-    Fun f l -> l
+  operands trm = case trm of
+    Fun _ l -> l
     _       -> []
 
   -- Get list of operand's references of term
-  operandRefs term = case term of
-    Fun f l -> map (\x -> TRef [x,term]) l
+  operandRefs trm = case trm of
+    Fun _ l -> map (\x -> TRef [x,trm]) l
     _       -> []
 
   -- Get term
@@ -97,10 +105,10 @@ instance ITerm Term where
 instance ITerm TermReference where
 
   -- Get header of term for term's reference
-  header (TRef (t:ts)) = header t
+  header (TRef (t:_)) = header t
 
   -- Get subterms list of term for term's reference
-  subterms (TRef (t:ts)) = subterms t
+  subterms (TRef (t:_)) = subterms t
   subterms (TRef [])     = []
 
   -- Get list of subterm's references of term for term's reference
@@ -108,18 +116,23 @@ instance ITerm TermReference where
     subrefs ref = ref : concatMap subrefs (operandRefs ref)
 
   -- Get operands list of term for term's reference
-  operands (TRef (t:ts)) = operands t
+  operands (TRef (t:_)) = operands t
 
   -- Get list of operand's references of term for term's reference
   operandRefs (TRef ref) = case head ref of
-    (Fun f l) -> map (\x -> TRef (x:ref)) l
+    (Fun _ l) -> map (\x -> TRef (x:ref)) l
     _         -> []
 
   -- Get term for term's reference
-  term (TRef (t:ts)) = t
+  term (TRef (t:_)) = t
 
   -- Get term's reference for term's reference
   termref t = t
+
+instance Foldable TermTemplate where
+  foldMap f (Const c) = f c
+  foldMap f (Var v) = f v
+  foldMap f (Fun fun l) = f fun `mappend` foldMap (foldMap f) l
 
 -- | returns list of parent subterms of current subterm
 parentRefs :: TermReference -> [Term]
@@ -146,7 +159,7 @@ instance Show Term where
     where
       sumstr []      = ""
       sumstr [a]     = a
-      sumstr (x:y:l) = x++","++sumstr (y:l)
+      sumstr (x:y:ls) = x++","++sumstr (y:ls)
 
 instance Read Term where
   --show :: Show f => Show v => (Term f v -> String)
@@ -166,15 +179,12 @@ infixr 5 &
 f&[] = Const f
 f&l  = Fun f l
 
-lengthf term = case term of
-  Fun f l -> 1 + sumf lengthf l
-  _       -> 1
-
 -- | converts 'TermReference' to 'Term'. For 'Sterm' and 'STermReference' same as 'term'
-refVal (TRef (x:xs)) = x
+--refVal (TRef (x:_)) = x
 --refVal (TRef []) = Empty
 
 -- replaces subterms from list s by corresponding subterms of list t
+replaceTerms :: Term -> [Term] -> [Term] -> Term
 replaceTerms x s t = case elemIndex x s of
   Just i  -> t!!i
   Nothing -> case x of

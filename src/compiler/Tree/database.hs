@@ -60,7 +60,7 @@ load sym db = db!sym
 loadTree :: LSymbol -> String -> IO Tree
 loadTree sym file = do
   db <- open file
-  return (load "example" db)
+  return (load sym db)
 
 -- Save the logical symbol 'sym' and the decision tree 'tree'
 -- to the database 'db'
