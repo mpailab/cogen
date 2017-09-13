@@ -13,5 +13,19 @@ Portability : POSIX
 module Compiler
     (
       -- exports
+      compile
     )
 where
+
+import Control.Monad
+
+  -- Internal imports
+import           Rule
+import           Term
+import           Compiler.Tree
+import           Compiler.Tree.Database
+
+compile :: Rule -> IO ()
+compile rule = do
+  let file = "database/tree.db"
+  saveTree (symbol rule) (Terminal (filters rule)) file

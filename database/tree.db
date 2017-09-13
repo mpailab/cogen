@@ -1,1 +1,1 @@
-fromList [("pls",Switch level[$x1] [([],Terminal [f[$x]]),([],Terminal [g[$y]])])]
+fromList [("pls",Terminal [scanLevel[two],or[not[problemtype[preobrazovat]],not[problemGoal[normIntegral]]]])]

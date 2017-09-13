@@ -27,6 +27,7 @@ import           Compiler.Tree
 import           Control.Exception
 import           Data.Map          ((!))
 import qualified Data.Map          as DB
+import           System.IO.Strict
 
 -- Internal imports
 import           Term
@@ -41,7 +42,7 @@ init = DB.empty
 -- Open a database saved in the file 'file'
 open :: String -> IO Database
 open file = do
-  contents::Either IOError String <- try $ readFile file
+  contents::Either IOError String <- try $ System.IO.Strict.readFile file
   case contents of
      Left _         -> return DB.empty
      Right contents -> return (read contents)

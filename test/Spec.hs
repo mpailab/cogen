@@ -7,6 +7,7 @@ import           System.Directory
 import           System.IO
 
 -- Internal imports
+import           Compiler
 import           Compiler.Tree
 import           Compiler.Tree.Database
 import           Rule
@@ -28,6 +29,12 @@ test num = case num of
     writeFile "tmp/test2.txt" $! show rules
     return True
 
+  3 -> do
+    rulesFile <- readFile "database/rules.db"
+    let rules::[Rule] = read rulesFile
+    compile $ head rules
+    return True
+
 -- | Run test with number num
 runTest :: Integer -> IO ()
 runTest num = do
@@ -39,6 +46,6 @@ main :: IO ()
 main = do
   createDirectoryIfMissing False "tmp"
   putStrLn "Run tests:"
-  let test_num = 2 in mapM runTest [1..test_num]
+  let test_num = 3 in mapM runTest [1..test_num]
   putStrLn "Done"
   removeDirectoryRecursive "tmp"
