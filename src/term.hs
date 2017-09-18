@@ -16,7 +16,7 @@ module Term
     (
       -- exports
       Term, TermTemplate(..), LSymbol, TermReference(..), ITerm(..), TermElement(..), elementName, (&),
-      replaceTerms, findMatches, hasMatch, parentRefs
+      replaceTerms, findMatches, hasMatch, parentRefs, isContainLSymbol
     )
 where
 
@@ -109,7 +109,7 @@ instance ITerm TermReference where
 
   -- Get subterms list of term for term's reference
   subterms (TRef (t:_)) = subterms t
-  subterms (TRef [])     = []
+  subterms (TRef [])    = []
 
   -- Get list of subterm's references of term for term's reference
   subtermRefs = subrefs where
@@ -130,8 +130,8 @@ instance ITerm TermReference where
   termref t = t
 
 instance Foldable TermTemplate where
-  foldMap f (Const c) = f c
-  foldMap f (Var v) = f v
+  foldMap f (Const c)   = f c
+  foldMap f (Var v)     = f v
   foldMap f (Fun fun l) = f fun `mappend` foldMap (foldMap f) l
 
 -- | returns list of parent subterms of current subterm
@@ -157,8 +157,8 @@ instance Show Term where
   show (Const c) = str c
   show (Fun f l) = str f ++ "[" ++ sumstr [show x | x<-l] ++ "]"
     where
-      sumstr []      = ""
-      sumstr [a]     = a
+      sumstr []       = ""
+      sumstr [a]      = a
       sumstr (x:y:ls) = x++","++sumstr (y:ls)
 
 instance Read Term where
@@ -200,7 +200,6 @@ rmdups = map head . group . sort
 --     then returns 'Just' [(x1,t1),...,(xn,tn)].
 --   Otherwise returns 'Nothing'
 hasMatch :: Term -> Term -> Maybe [(LSymbol, Term)]
-
 hasMatch trm patt = case r of
   (True, l) -> if isMapping sl then Just sl else Nothing where sl = rmdups l
   (False, _) -> Nothing
@@ -223,3 +222,10 @@ findMatches trm patt = concatMap m (subterms trm)
     m x = case hasMatch x patt of
       Nothing -> []
       Just l  -> [(x,l)]
+
+-- | Does a term contain a logical symbol
+isContainLSymbol :: Term -> LSymbol -> Bool
+isContainLSymbol trm sym = any f trm
+  where
+    f x | x == sym = True
+    f _ = False

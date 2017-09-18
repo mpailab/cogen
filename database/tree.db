@@ -1,1 +1,1 @@
-fromList [("pls",Terminal [scanLevel[two],or[not[problemtype[preobrazovat]],not[problemGoal[normIntegral]]]])]
+fromList [("pls",Terminal [])]

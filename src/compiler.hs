@@ -19,6 +19,7 @@ where
 
 -- External imports
 import           Control.Monad
+import           Data.List
 
 -- Internal imports
 import           Compiler.Tree
@@ -61,6 +62,7 @@ parseReplaceTheorem (Fun "forall" t) is_right = do
       (Fun "equal" [from, to] : ss) -> if is_right
         then return ([], [], from, to)
         else return ([], [], to, from)
+      _                             -> error "Failed theorem conclusion"
 
     -- Parse a premise
     parse (p : s) = do
@@ -77,13 +79,15 @@ getTheorem rule = case Rule.header rule of
 -- |Type of filters depending on its usage
 data FiltersRank = FiltersRank
   {
-    context        :: [Term],
-    unknownFilters :: [Term]
+    getContext   :: [Term], -- ^ a list of filters containing the logical symbol 'kontekst'
+    otherFilters :: [Term]  -- ^ a list of another filters
   }
 
 -- |Get a ranked filters for a rule
 rankFilters :: Rule -> IO FiltersRank
-rankFilters rule = return (FiltersRank (filters rule) [])
+rankFilters rule = do
+  let (cfs, ofs) = partition (`isContainLSymbol` "kontekst") (filters rule)
+  return (FiltersRank cfs ofs)
 
 -- |Type of specifiers depending on its usage
 data SpecifiersRank = SpecifiersRank
@@ -115,7 +119,7 @@ genIdentProg rule = return (IdentProgram [] [])
 
 -- |Generate a program of filters
 genFilterProg :: FiltersRank -> Program -> IO Program
-genFilterProg f_rank i_prog = return (FilterProgram (context f_rank) [])
+genFilterProg f_rank i_prog = return (FilterProgram (getContext f_rank) [])
 
 -- |Generate a checking program
 genCheckProg :: Rule -> SpecifiersRank -> Program -> Program -> IO Program
