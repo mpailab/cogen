@@ -57,17 +57,23 @@ parseReplaceTheorem (Fun "forall" t) is_right = do
     -- Switch to a list of premises
     parse (Const "if" : s) = parse s
 
+    -- Switch to a conclusion
+    parse (Const "then" : s) = parse s
+
     -- Parse a conclusion
-    parse (Const "then" : s) = case s of
-      (Fun "equal" [from, to] : ss) -> if is_right
-        then return ([], [], from, to)
-        else return ([], [], to, from)
-      _                             -> error "Failed theorem conclusion"
+    parse (Fun "equal" [from, to] : s) = if is_right
+      then return ([], [], from, to)
+      else return ([], [], to, from)
+    parse (Fun "ekvivalentno" [from, to] : s) = if is_right
+      then return ([], [], from, to)
+      else return ([], [], to, from)
 
     -- Parse a premise
     parse (p : s) = do
       (bs, ps, from, to) <- parse s
       return (bs, p:ps, from, to)
+
+    parse [] = error "Failed theorem conclusion"
 
 -- |Get a theorem for an inference rule
 getTheorem :: Rule -> IO Theorem
@@ -79,15 +85,23 @@ getTheorem rule = case Rule.header rule of
 -- |Type of filters depending on its usage
 data FiltersRank = FiltersRank
   {
-    getContext   :: [Term], -- ^ a list of filters containing the logical symbol 'kontekst'
-    otherFilters :: [Term]  -- ^ a list of another filters
+    getUncondFilters  :: [Term], -- ^ a list of filters which does not depend on theorem variables
+    getContextFilters :: [Term], -- ^ a list of filters containing the logical symbol 'kontekst'
+    otherFilters      :: [Term]  -- ^ a list of another filters
   }
+
+-- | Does a term represent an unconditional filter
+isUncondFilter :: Term -> Bool
+isUncondFilter t = case t of
+  Fun "scanLevel" [Const "one"] -> True
+  _                             -> False
 
 -- |Get a ranked filters for a rule
 rankFilters :: Rule -> IO FiltersRank
 rankFilters rule = do
-  let (cfs, ofs) = partition (`isContainLSymbol` "kontekst") (filters rule)
-  return (FiltersRank cfs ofs)
+  let (cfs, fs)  = partition (`isContainLSymbol` "kontekst") (filters rule)
+  let (ufs, ofs) = partition isUncondFilter fs
+  return (FiltersRank ufs cfs ofs)
 
 -- |Type of specifiers depending on its usage
 data SpecifiersRank = SpecifiersRank
@@ -115,11 +129,37 @@ data Program
 
 -- |Generate an identifying program
 genIdentProg :: Rule -> IO Program
-genIdentProg rule = return (IdentProgram [] [])
+genIdentProg rule = do
+  thrm <- getTheorem rule
+  let from = getFrom thrm
+  let to   = getTo thrm
+  let i = 1;
+  let tt = Var ("p" ++ show i)
+  let ctrm = Fun "current_term" [tt]
+  (tl,_) <- ident from tt [ctrm] (i+1)
+  return (IdentProgram tl [])
+    where
+      ident :: Monad m => Term -> Term -> [Term] -> Int -> m ([Term], Int)
+      ident (Var _) cur_trm t_list idx = return (t_list, idx)
+      ident trm cur_trm t_list idx = do
+        let sterm = Fun "equal" [Fun "symbol" [cur_trm], Const (elementName (Term.header trm))]
+        let sub_trms = operands trm
+        let l = concat $ zipWith f sub_trms [0 .. length sub_trms - 1]
+        return (t_list ++ (sterm : l), idx)
+        where
+          f :: Term -> Int -> [Term]
+          f x i = do
+            let nt = Var ("p" ++ show idx)
+            let oterm = Fun "equal" [nt, Fun "operand" [cur_trm, Const (show i)]]
+            (sub_tl,new_idx) <- ident x nt [oterm] (idx+1)
+            let idx = new_idx
+            sub_tl
 
 -- |Generate a program of filters
 genFilterProg :: FiltersRank -> Program -> IO Program
-genFilterProg f_rank i_prog = return (FilterProgram (getContext f_rank) [])
+genFilterProg f_rank i_prog = do
+  let fs = getUncondFilters f_rank
+  return (FilterProgram fs [])
 
 -- |Generate a checking program
 genCheckProg :: Rule -> SpecifiersRank -> Program -> Program -> IO Program
@@ -127,11 +167,15 @@ genCheckProg rule s_rank i_prog f_prog = return (CheckProgram [])
 
 -- |Generate a replacing program
 genReplaceProg :: Rule -> Program -> Program -> IO Program
-genReplaceProg rule i_prog f_prog = return (ReplaceProgram [])
+genReplaceProg rule i_prog f_prog = return (ReplaceProgram [Const "replacing"])
 
 -- |Generate a decision tree for a rule
 genTree :: Rule -> Program -> Program -> Program -> Program -> IO Tree
-genTree rule i_prog f_prog c_prog r_prog = return (Terminal (commands f_prog))
+genTree rule i_prog f_prog c_prog r_prog = do
+  let t_node = Terminal (commands r_prog)
+  let br_node_i = Branch [(commands i_prog, t_node)]
+  let br_node_f = Branch [(commands f_prog, br_node_i)]
+  return br_node_f
 
 -- |Compile an inference rule
 compile :: Rule -> IO ()

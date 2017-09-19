@@ -1,1 +1,1 @@
-fromList [("pls",Terminal [])]
+fromList [("pls",Branch [([scanLevel[one]],Branch [([current_term[$p1],equal[symbol[$p1],equal],equal[$p2,operand[$p1,0]],equal[symbol[$p2],pls],equal[$p3,operand[$p2,0]],equal[$p3,operand[$p2,1]],equal[$p2,operand[$p1,1]],equal[symbol[$p2],pls],equal[$p3,operand[$p2,0]],equal[symbol[$p3],otr],equal[$p4,operand[$p3,0]],equal[$p3,operand[$p2,1]]],Terminal [replacing])])])]

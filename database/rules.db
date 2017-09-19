@@ -1,5 +1,12 @@
 [Rule {
   symbol      = "pls",
+  theorem     = forall[$x1,$x2,$x3,ekvivalentno[equal[pls[$x1,$x2],pls[otr[$x1],$x3]],equal[$x2,otr[$x3]]]],
+  header      = secondsubterm,
+  filters     = [scanLevel[one]],
+  specifiers  = [edinica[zero,$x2,$x3]],
+  normalizers = [bistrpreobr[otr[$x3],normotr]]
+},Rule {
+  symbol      = "pls",
   theorem     = forall[$x2,$x3,$x4,$x5,$x6,equal[drob[$x2,multiplication[$x6,stepen[drob[$x3,$x5],$x4]]],drob[multiplication[$x2,stepen[drob[$x5,$x3],$x4]],$x6]]],
   header      = problemtype,
   filters     = [
@@ -213,13 +220,6 @@
   filters     = [scanLevel[one]],
   specifiers  = [],
   normalizers = []
-},Rule {
-  symbol      = "pls",
-  theorem     = forall[$x1,$x2,$x3,ekvivalentno[equal[pls[$x1,$x2],pls[otr[$x1],$x3]],equal[$x2,otr[$x3]]]],
-  header      = secondsubterm,
-  filters     = [scanLevel[one]],
-  specifiers  = [edinica[zero,$x2,$x3]],
-  normalizers = [bistrpreobr[otr[$x3],normotr]]
 },Rule {
   symbol      = "pls",
   theorem     = forall[$x1,equal[pls[$x1,zero],$x1]],

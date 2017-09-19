@@ -25,13 +25,13 @@ test num = case num of
 
   2 -> do
     rulesFile <- readFile "database/rules.db"
-    let rules::[Rule] = read rulesFile
+    let rules = read rulesFile :: [Rule]
     writeFile "tmp/test2.txt" $! show rules
     return True
 
   3 -> do
     rulesFile <- readFile "database/rules.db"
-    let rules::[Rule] = read rulesFile
+    let rules = read rulesFile :: [Rule]
     compile $ head rules
     return True
 

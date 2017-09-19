@@ -1,7 +1,66 @@
-if
-then
-equal
-forall
-firstsubterm
-secondsubterm
-kontekst
+[
+Symbol {
+  id                = 1,
+  name              = "if",
+  synonyms          = [],
+  inner             = False,
+  los               = True,
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 2,
+  name              = "then",
+  synonyms          = [],
+  inner             = False,
+  los               = True,
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 3,
+  name              = "equal",
+  synonyms          = ["=="],
+  inner             = False,
+  los               = True,
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 4,
+  name              = "forall",
+  synonyms          = [""],
+  inner             = False,
+  los               = True,
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 5,
+  name              = "right to left",
+  synonyms          = ["firstsubterm"],
+  inner             = False,
+  los               = True,
+  categories        = ["Rule.Header"],
+  description       = "Theorem header for right-to-left replacing of terms"
+
+},
+Symbol {
+  id                = 6,
+  name              = "left to right",
+  synonyms          = ["secondsubterm"],
+  inner             = False,
+  los               = True,
+  categories        = ["Rule.Header"],
+  description       = "Theorem header for left-to-right replacing of terms"
+},
+Symbol {
+  id                = 7,
+  name              =  "",
+  synonyms          = ["kontekst"],
+  inner             = False,
+  los               = True,
+  categories        = ["Rule.Filter", "Rule.Specifier"],
+  description       = ""
+}
+]
