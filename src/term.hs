@@ -15,8 +15,8 @@ Portability : POSIX
 module Term
     (
       -- exports
-      Term, TermTemplate(..), LSymbol, TermReference(..), ITerm(..), TermElement(..), elementName, (&),
-      replaceTerms, findMatches, hasMatch, parentRefs, isContainLSymbol
+      Term, TermTemplate(..), LSymbol, TermReference(..), ITerm(..), ITermList(..), TermElement(..), elementName, (&),
+      replaceTerms, findMatches, hasMatch, parentRefs, equalTerms, isContainLSymbol
     )
 where
 
@@ -37,7 +37,6 @@ data TermTemplate f
   | Var f                  -- ^ variable node
   | Fun f [TermTemplate f] -- ^ function node with argument list. Each argument is also a term.
   deriving (Eq, Ord)
-
 
 -- | term with arbitrary functional symbols and variable symbols of type LSymbol
 type Term = TermTemplate LSymbol
@@ -67,6 +66,41 @@ class ITerm t where
   operandRefs :: t -> [TermReference] -- ^ enumerate references to operands of current term
   term        :: t -> Term            -- ^ converts given object to 'Term' type
   termref     :: t -> TermReference   -- ^ returns reference to current term or subterm
+
+class ITermList tl where
+  termList :: tl -> [Term]
+
+instance (ITerm t) => ITermList [t] where
+  termList = map term
+
+instance ITermList () where
+  termList () = []
+--instance (ITerm t) => ITermList t where
+--  termList tt = [term t]
+
+instance (ITerm t1, ITerm t2) => ITermList (t1,t2) where
+  termList (tt1, tt2) = [term tt1, term tt2]
+
+instance (ITerm t1, ITerm t2, ITerm t3) => ITermList (t1,t2,t3) where
+  termList (tt1, tt2, tt3) = [term tt1, term tt2, term tt3]
+
+instance (ITerm t1, ITerm t2, ITerm t3, ITerm t4) => ITermList (t1,t2,t3,t4) where
+  termList (tt1, tt2, tt3, tt4) = [term tt1, term tt2, term tt3, term tt4]
+
+-- | comparison of 2 terms
+equalTerms t1 t2 = term t1 == term t2
+
+-- | 'TermElement' represents term of one element
+instance ITerm TermElement where
+  term (TermVar x) = Var x
+  term (LSymbol s) = Const s
+
+  header te = te
+  subterms te = [term te]
+  termref te = TRef [term te]
+  subtermRefs te = [termref te]
+  operands _ = []
+  operandRefs _ = []
 
 -- | 'Term' represents term itself
 instance ITerm Term where
@@ -109,7 +143,7 @@ instance ITerm TermReference where
 
   -- Get subterms list of term for term's reference
   subterms (TRef (t:_)) = subterms t
-  subterms (TRef [])    = []
+  subterms (TRef [])     = []
 
   -- Get list of subterm's references of term for term's reference
   subtermRefs = subrefs where
@@ -130,8 +164,8 @@ instance ITerm TermReference where
   termref t = t
 
 instance Foldable TermTemplate where
-  foldMap f (Const c)   = f c
-  foldMap f (Var v)     = f v
+  foldMap f (Const c) = f c
+  foldMap f (Var v) = f v
   foldMap f (Fun fun l) = f fun `mappend` foldMap (foldMap f) l
 
 -- | returns list of parent subterms of current subterm
@@ -157,8 +191,8 @@ instance Show Term where
   show (Const c) = str c
   show (Fun f l) = str f ++ "[" ++ sumstr [show x | x<-l] ++ "]"
     where
-      sumstr []       = ""
-      sumstr [a]      = a
+      sumstr []      = ""
+      sumstr [a]     = a
       sumstr (x:y:ls) = x++","++sumstr (y:ls)
 
 instance Read Term where
@@ -175,9 +209,9 @@ instance Read Term where
           x     -> x
 
 infixr 5 &
-(&) :: LSymbol -> [Term] -> Term
-f&[] = Const f
-f&l  = Fun f l
+(&) :: (ITermList tl) => LSymbol -> tl -> Term
+--f&[] = Const f
+f&l  = Fun f (termList l)
 
 -- | converts 'TermReference' to 'Term'. For 'Sterm' and 'STermReference' same as 'term'
 --refVal (TRef (x:_)) = x
@@ -200,6 +234,7 @@ rmdups = map head . group . sort
 --     then returns 'Just' [(x1,t1),...,(xn,tn)].
 --   Otherwise returns 'Nothing'
 hasMatch :: Term -> Term -> Maybe [(LSymbol, Term)]
+
 hasMatch trm patt = case r of
   (True, l) -> if isMapping sl then Just sl else Nothing where sl = rmdups l
   (False, _) -> Nothing
