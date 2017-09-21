@@ -19,6 +19,7 @@ where
 
 -- External imports
 import           Control.Monad
+import           Control.Monad.State
 import           Data.List
 
 -- Internal imports
@@ -41,18 +42,16 @@ data Theorem
   | OtherTheorem
 
 -- |Parse a term as the theorem of an inference rule
-parseReplaceTheorem :: Term -> Bool -> IO Theorem
-parseReplaceTheorem (Fun "forall" t) is_right = do
-  (bs, ps, from, to) <- parse t
-  return (ReplaceTheorem bs ps from to)
+parseReplaceTheorem :: Term -> Bool -> Theorem
+parseReplaceTheorem (Fun "forall" t) is_right = ReplaceTheorem bs ps from to
   where
+    (bs, ps, from, to) = parse t
+
     -- Parse a list of terms as the replacing theorem
-    parse :: Monad m => [Term] -> m ([LSymbol], [Term], Term, Term)
+    parse :: [Term] -> ([LSymbol], [Term], Term, Term)
 
     -- Parse a bounded variable
-    parse (Var x : s) = do
-      (bs, ps, from, to) <- parse s
-      return (x:bs, ps, from, to)
+    parse (Var x : s) = let (bs, ps, from, to) = parse s in (x:bs, ps, from, to)
 
     -- Switch to a list of premises
     parse (Const "if" : s) = parse s
@@ -62,32 +61,30 @@ parseReplaceTheorem (Fun "forall" t) is_right = do
 
     -- Parse a conclusion
     parse (Fun "equal" [from, to] : s) = if is_right
-      then return ([], [], from, to)
-      else return ([], [], to, from)
+      then ([], [], from, to)
+      else ([], [], to, from)
     parse (Fun "ekvivalentno" [from, to] : s) = if is_right
-      then return ([], [], from, to)
-      else return ([], [], to, from)
+      then ([], [], from, to)
+      else ([], [], to, from)
 
     -- Parse a premise
-    parse (p : s) = do
-      (bs, ps, from, to) <- parse s
-      return (bs, p:ps, from, to)
+    parse (p : s) = let (bs, ps, from, to) = parse s in (bs, p:ps, from, to)
 
     parse [] = error "Failed theorem conclusion"
 
 -- |Get a theorem for an inference rule
-getTheorem :: Rule -> IO Theorem
+getTheorem :: Rule -> Theorem
 getTheorem rule = case Rule.header rule of
   Const "firstsubterm"  -> parseReplaceTheorem (theorem rule) False
   Const "secondsubterm" -> parseReplaceTheorem (theorem rule) True
-  _                     -> return OtherTheorem
+  _                     -> OtherTheorem
 
 -- |Type of filters depending on its usage
 data FiltersRank = FiltersRank
   {
-    getUncondFilters  :: [Term], -- ^ a list of filters which does not depend on theorem variables
-    getContextFilters :: [Term], -- ^ a list of filters containing the logical symbol 'kontekst'
-    otherFilters      :: [Term]  -- ^ a list of another filters
+    getUncondFilters  :: [Term], -- ^ list of filters which does not depend on theorem variables
+    getContextFilters :: [Term], -- ^ list of filters containing the logical symbol 'kontekst'
+    otherFilters      :: [Term]  -- ^ list of another filters
   }
 
 -- | Does a term represent an unconditional filter
@@ -127,33 +124,47 @@ data Program
   -- | Condtructor for an empty program
   | EmptyProgram   { commands :: [Term] }
 
+-- | Type of program information
+data ProgInfo = ProgInfo
+  {
+    getTerms  :: [Term], -- ^ list of program terms
+    getVarNum :: Int     -- ^ number of first free program variable
+  }
+
+-- | Identify a term
+identTerm :: Term                 -- ^ theorem's term
+          -> Term                 -- ^ program term
+          -> State ProgInfo Bool  -- ^ return value and info
+
+-- Case of theorem's variable
+identTerm (Var _) _ = return True
+
+-- General case
+identTerm tt pt  = do
+  info <- get
+  let st = Fun "equal" [Fun "symbol" [pt], Const (elementName (Term.header tt))]
+  let new_info = ProgInfo (getTerms info ++ [st]) (getVarNum info)
+  let (res, info) = foldr f (True, new_info) (operands tt)
+  put info
+  return res
+  where
+    -- Identify a subterm of current theorems's term
+    f :: Term -> (Bool, ProgInfo) -> (Bool, ProgInfo)
+    f x (r,i) = (r && nr, ni)
+      where
+        (nr, ni) = runState (identTerm x p) (ProgInfo (getTerms i ++ [o]) (getVarNum i + 1))
+        o = Fun "equal" [p, Fun "operand" [pt]]
+        p = Var ("p" ++ show (getVarNum i))
+
 -- |Generate an identifying program
 genIdentProg :: Rule -> IO Program
-genIdentProg rule = do
-  thrm <- getTheorem rule
-  let from = getFrom thrm
-  let to   = getTo thrm
-  let i = 1;
-  let tt = Var ("p" ++ show i)
-  let ctrm = Fun "current_term" [tt]
-  (tl,_) <- ident from tt [ctrm] (i+1)
-  return (IdentProgram tl [])
-    where
-      ident :: Monad m => Term -> Term -> [Term] -> Int -> m ([Term], Int)
-      ident (Var _) cur_trm t_list idx = return (t_list, idx)
-      ident trm cur_trm t_list idx = do
-        let sterm = Fun "equal" [Fun "symbol" [cur_trm], Const (elementName (Term.header trm))]
-        let sub_trms = operands trm
-        let l = concat $ zipWith f sub_trms [0 .. length sub_trms - 1]
-        return (t_list ++ (sterm : l), idx)
-        where
-          f :: Term -> Int -> [Term]
-          f x i = do
-            let nt = Var ("p" ++ show idx)
-            let oterm = Fun "equal" [nt, Fun "operand" [cur_trm, Const (show i)]]
-            (sub_tl,new_idx) <- ident x nt [oterm] (idx+1)
-            let idx = new_idx
-            sub_tl
+genIdentProg rule = return (IdentProgram tl [])
+  where
+    tl = getTerms (execState (identTerm (getFrom thrm) pt) info)
+    thrm = getTheorem rule
+    info = ProgInfo [Fun "current_term" [pt]] (i+1)
+    pt = Var ("p" ++ show i)
+    i = 1
 
 -- |Generate a program of filters
 genFilterProg :: FiltersRank -> Program -> IO Program
