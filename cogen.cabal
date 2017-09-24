@@ -16,12 +16,13 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Compiler
+                       Compiler.Info
+                       Compiler.Program
+                       LSymbol
                        Rule
-                       Compiler.Tree
-                       Compiler.Tree.Database
                        Term
   build-depends:       base >= 4.7 && < 5
-                     , containers, strict, mtl
+                     , containers, strict, mtl, directory, filepath
   default-language:    Haskell2010
 
 executable cogen-exe
