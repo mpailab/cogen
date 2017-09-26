@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 {-|
 Module      : Compiler.Info
 Description : Representation of information structure in compiler
@@ -10,12 +12,14 @@ Portability : POSIX
 module Compiler.Info
     (
       -- exports
-      Info(..)
+      Info(..), Unit(..),
+      Compiler.Info.init, addUnit, getRule
     )
 where
 
 -- External imports
-import qualified Data.Map         as Map
+import           Control.Monad.State
+import qualified Data.Map            as Map
 
 -- Internal imports
 import           Compiler.Program
@@ -29,37 +33,77 @@ type Units = Map.Map LSymbol Unit
 -- | Type of information structure in compiler
 data Info = Info
   {
+    rule     :: Rule,     -- ^ compiled rule
     variable :: Int,      -- ^ number of first free program variable
     units    :: Units,    -- ^ table of information units
     program  :: [Program] -- ^ list of program fragments
   }
 
+init :: Rule -> Info
+init rule = Info rule 1 initUnits []
+
 -- | Type of information units
-data Unit
+data Unit = I Int
+          | S LSymbol
+          | T Term
+          | IS [Int]
+          | SS [LSymbol]
+          | TS [Term]
+          | EmptyUnit
 
-  -- | List of bound variables in theorem of rule
-  = BoundVars { vars :: [LSymbol] }
+  -- -- | List of bound variables in theorem of rule
+  -- = BoundVars { vars :: [LSymbol] }
+  --
+  -- -- | Substituted term in theorem of rule
+  -- | From { from :: Term }
+  --
+  -- -- | List of premises in theorem of rule
+  -- | Premises { premises :: [Term] }
+  --
+  -- | Root
+  --   {
+  --     root :: Int -- ^ number of program variable representing
+  --                 --   a reference to the root of identified term
+  --   }
+  --
+  -- -- | Current inference rule
+  -- | Rule { rule :: Rule }
+  --
+  -- -- | Binding symbol of current rule
+  -- | Symbol { symbol :: LSymbol }
+  --
+  -- -- | Substituting term in theorem of rule
+  -- | To { to :: Term }
+  --
+  -- -- | Empty represents an auxiliary information unit
+  -- | Empty
 
-  -- | Substituted term in theorem of rule
-  | From { from :: Term }
+initUnits :: Units
+initUnits = Map.empty
 
-  -- | List of premises in theorem of rule
-  | Premises { premises :: [Term] }
+class AddUnit a where
+  addUnit :: LSymbol -> a -> State Info ()
 
-  | Root
-    {
-      root :: Int -- ^ number of program variable representing
-                  --   a reference to the root of identified term
-    }
+instance AddUnit Int where
+  addUnit sym n = addUnitInternal sym $ I n
 
-  -- | Current inference rule
-  | Rule { rule :: Rule }
+instance AddUnit LSymbol where
+  addUnit sym s = addUnitInternal sym $ S s
 
-  -- | Binding symbol of current rule
-  | Symbol { symbol :: LSymbol }
+instance AddUnit Term where
+  addUnit sym t = addUnitInternal sym $ T t
 
-  -- | Substituting term in theorem of rule
-  | To { to :: Term }
+instance AddUnit [Int] where
+  addUnit sym ns = addUnitInternal sym $ IS ns
 
-  -- | Empty represents an auxiliary information unit
-  | Empty
+instance AddUnit [LSymbol] where
+  addUnit sym ss = addUnitInternal sym $ SS ss
+
+instance AddUnit [Term] where
+  addUnit sym ts = addUnitInternal sym $ TS ts
+
+addUnitInternal :: LSymbol -> Unit -> State Info ()
+addUnitInternal sym unit = modify (\info -> info { units = Map.insert sym unit (units info) })
+
+getRule :: State Info Rule
+getRule = state $ \info -> (rule info, info)

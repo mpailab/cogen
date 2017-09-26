@@ -16,6 +16,7 @@ module Term
     (
       -- exports
       Term, Tree(..),
+      header,
       isContainLSymbol
     )
 where

@@ -17,7 +17,7 @@ module Compiler.Program
     (
       -- exports
       Program(..),
-      open, close, get, put, load, save
+      openProgramDB, closeProgramDB, getProgram, putProgram, loadProgram, saveProgram
     )
 where
 
@@ -82,8 +82,8 @@ data Program
 type Database = DB.Map LSymbol Program
 
 -- | Initialize a database from one saved in given directory
-open :: String -> IO Database
-open dir = do
+openProgramDB :: String -> IO Database
+openProgramDB dir = do
   dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
   case dir_content of
      Left _            -> return DB.empty
@@ -94,11 +94,11 @@ open dir = do
          content <- try (readFile file) :: IO (Either IOError FilePath)
          case content of
             Left _        -> return db
-            Right content -> return (put (read $ takeBaseName file) (read content) db)
+            Right content -> return (putProgram (read $ takeBaseName file) (read content) db)
 
 -- | Close a database and save it in given directory
-close :: Database -> String -> IO ()
-close db dir = do
+closeProgramDB :: Database -> String -> IO ()
+closeProgramDB db dir = do
   createDirectoryIfMissing True dir
   mapM_ f (DB.assocs db)
   where
@@ -106,25 +106,25 @@ close db dir = do
     f (sym, prog) = writeFile (dir ++ show sym ++ ".db") (show prog)
 
 -- | Get a program of logical symbol from a database
-get :: LSymbol -> Database -> Maybe Program
-get sym db = case DB.lookup sym db of
+getProgram :: LSymbol -> Database -> Maybe Program
+getProgram sym db = case DB.lookup sym db of
   Just prog -> return prog
   Nothing   -> return Empty
 
 -- | Load a program of logical symbol from a database saved in given directory
-load :: LSymbol -> String -> IO Program
-load sym dir = do
+loadProgram :: LSymbol -> String -> IO Program
+loadProgram sym dir = do
   content <- try (readFile (dir ++ show sym ++ ".db")) :: IO (Either IOError FilePath)
   case content of
     Left _        -> return Empty
     Right content -> return (read content)
 
 -- | Put a program of logical symbol to a database
-put :: LSymbol -> Program -> Database -> Database
-put = DB.insert
+putProgram :: LSymbol -> Program -> Database -> Database
+putProgram = DB.insert
 
 -- | Save a program of logical symbol to a database saved in given directory
-save :: LSymbol -> Program -> String -> IO ()
-save sym prog dir = do
+saveProgram :: LSymbol -> Program -> String -> IO ()
+saveProgram sym prog dir = do
   createDirectoryIfMissing True dir
   writeFile (dir ++ show sym ++ ".db") (show prog)

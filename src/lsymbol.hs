@@ -19,19 +19,25 @@ where
 -- | Type of logical symbols
 data LSymbol = P Int                    -- ^ program variable
              | X Int                    -- ^ theorem variable
-             | If                       -- ^
-             | Then                     -- ^
+             | Bounds                   -- ^ Compiler: list of bouned variables
+                                        --             in the theorem of rule
+             | Context                  -- ^
              | Equal                    -- ^
              | Equivalence              -- ^
              | Forall                   -- ^
-             | RightToLeft              -- ^
-             | LeftToRight              -- ^
-             | Context                  -- ^
-             | Operands                 -- ^
+             | From                     -- ^ Compiler: substituted term
+                                        --             in the theorem of rule
+             | If                       -- ^ Term: symbol in if-then statement
+             | LeftToRight              -- ^ Rule: header of rule
              | Level                    -- ^
-             | Symbol                   -- ^
-             | CurrentTerm              -- ^
-             | Replacing                -- ^
+             | Operands                 -- ^
+             | Premises                 -- ^ Compiler: list of premises
+                                        --             in the theorem of rule
+             | RightToLeft              -- ^ Rule: header of rule
+             | Symbol                   -- ^ Compiler: binding symbol of rule
+             | Then                     -- ^ Term: symbol in if-then statement
+             | To                       -- ^ Compiler: substituting term
+                                        --             in the theorem of rule
              deriving (Eq, Ord, Read, Show)
 
 data Info = Info
