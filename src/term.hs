@@ -17,15 +17,13 @@ module Term
       -- exports
       Term, Tree(..),
       header,
+      drawTerm,
       isContainLSymbol
     )
 where
 
 -- External imports
-import qualified Control.Arrow as Arrow
---import           Control.Monad
-import           Data.List
---import           Data.String
+import           Data.Char
 
 -- Internal imports
 import           LSymbol
@@ -33,7 +31,7 @@ import           LSymbol
 data Tree a = Var a
             | Const a
             | a :> [Tree a]
-            deriving (Eq, Ord, Read, Show)
+            deriving (Eq, Ord)
 
 instance Foldable Tree where
   foldMap f (Var v)   = f v
@@ -41,6 +39,35 @@ instance Foldable Tree where
   foldMap f (s :> l)  = f s `mappend` foldMap (foldMap f) l
 
 type Term = Tree LSymbol
+
+instance Show Term where
+  show (Var (P x))   = "$p" ++ show x
+  show (Var (X x))   = "$x" ++ show x
+  show (Const (C x)) = show x
+  show (Const x)     = show x
+  show (s :> l)      = show s ++ "[" ++ sumstr [show x | x <- l] ++ "]"
+    where
+      sumstr []      = ""
+      sumstr [a]     = a
+      sumstr (x:y:l) = x ++ "," ++ sumstr (y:l)
+
+instance Read Term where
+  readsPrec _ str = do
+    [print (str ++ "\n")]
+    case lex str of
+      ("$",r):_   -> [(Var $ f v, x) | (v,x) <- lex r]
+      (s,'[':r):_ -> [(read s :> ts, x) | (ts,x) <- reads ('[':r)]
+      (s,r):_     -> [(Const $ g s, r)]
+      _           -> []
+    where
+      f str = case str of
+        'x':s -> X $ read s
+        'p':s -> P $ read s
+        s     -> read s
+      g x@(s:r) =
+        if isDigit s
+          then C $ read x
+          else read x
 
 drawTerm :: Term -> String
 drawTerm  = unlines . draw

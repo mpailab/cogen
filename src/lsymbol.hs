@@ -16,9 +16,12 @@ module LSymbol
     )
 where
 
+-- External imports
+
 -- | Type of logical symbols
 data LSymbol = P Int                    -- ^ program variable
              | X Int                    -- ^ theorem variable
+             | C Int                    -- ^ constants
              | Bounds                   -- ^ Compiler: list of bouned variables
                                         --             in the theorem of rule
              | Context                  -- ^
@@ -30,7 +33,9 @@ data LSymbol = P Int                    -- ^ program variable
              | If                       -- ^ Term: symbol in if-then statement
              | LeftToRight              -- ^ Rule: header of rule
              | Level                    -- ^
+             | Negation                 -- ^
              | Operands                 -- ^
+             | Plus                     -- ^
              | Premises                 -- ^ Compiler: list of premises
                                         --             in the theorem of rule
              | RightToLeft              -- ^ Rule: header of rule

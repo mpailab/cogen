@@ -2,14 +2,15 @@
 
 -- External imports
 import           Control.Concurrent
-import           Prelude                hiding (init)
+import           Control.Monad
+import           Data.Typeable
+import           Prelude            hiding (init)
 import           System.Directory
 import           System.IO
 
 -- Internal imports
 import           Compiler
-import           Compiler.Tree
-import           Compiler.Tree.Database
+import           LSymbol
 import           Rule
 import           Term
 
@@ -17,22 +18,18 @@ import           Term
 test :: Integer -> IO Bool
 test num = case num of
   1 -> do
-    let tree_before = Switch ("level"&[Var "x1"]) [([], Terminal ["f"&[Var "x"]]),([],Terminal ["g"&[Var "y"]])]
-    let file = "tmp/test1.txt"
-    saveTree "example" tree_before file
-    tree_after <- loadTree "example" file
-    return (tree_before == tree_after)
+    let sym = Plus
+    let thrm = Forall :> [Var (X 1), Var (X 2), Var (X 3), Equivalence :> [Equal :> [Plus :> [Var (X 1), Var (X 2)], Plus :> [Negation :> [Var (X 1)], Var (X 3)]], Equal :> [Var (X 2), Negation :> [Var (X 3)]]]]
+    let h = Const LeftToRight
+    let rule = Rule sym thrm h [Level :> [Var (X 3)]] [Var (X 3)] [Var (X 3)]
+    writeFile "tmp/test1.txt" (show rule)
+    writeFile "tmp/draw.txt" (drawTerm thrm)
+    return True
 
   2 -> do
     rulesFile <- readFile "database/rules.db"
     let rules = read rulesFile :: [Rule]
-    writeFile "tmp/test2.txt" $! show rules
-    return True
-
-  3 -> do
-    rulesFile <- readFile "database/rules.db"
-    let rules = read rulesFile :: [Rule]
-    compile $ head rules
+    forM_ rules compile
     return True
 
 -- | Run test with number num
@@ -46,6 +43,6 @@ main :: IO ()
 main = do
   createDirectoryIfMissing False "tmp"
   putStrLn "Run tests:"
-  let test_num = 3 in mapM runTest [1..test_num]
+  let test_num = 2 in mapM runTest [1..test_num]
   putStrLn "Done"
   removeDirectoryRecursive "tmp"

@@ -21,6 +21,7 @@ where
 import           Control.Monad
 import           Control.Monad.State
 import           Data.List
+import           Data.Maybe
 
 -- Internal imports
 import           Compiler.Info
@@ -33,10 +34,10 @@ import           Term
 parseReplaceTheorem :: Term -> Bool -> State Info ()
 parseReplaceTheorem (Forall :> ts) is_right = do
   let (bs, ps, from, to) = parse ts
-  addUnit Bounds bs
-  addUnit Premises ps
-  addUnit From from
-  addUnit To to
+  addInfoUnit Bounds bs
+  addInfoUnit Premises ps
+  addInfoUnit From from
+  addInfoUnit To to
   where
     -- Parse a list of terms as the replacing theorem
     parse :: [Term] -> ([LSymbol], -- ^ a list of bouned variables
@@ -80,7 +81,9 @@ modifyTheorem = modify id
 
 -- | Bind the theorem of inference rule to a logical symbol
 bindTheorem :: State Info ()
-bindTheorem = modify id
+bindTheorem = do
+  rule <- getRule
+  addInfoUnit Symbol (symbol rule)
 
 -- | Prepare the theorem of inference rule
 prepTheorem :: State Info ()
@@ -110,19 +113,31 @@ makeCheckProg = modify id
 makeReplaceProg :: State Info ()
 makeReplaceProg = modify id
 
+-- | Link program fragments of inference rule
+linkProgram :: State Info (Program, LSymbol)
+linkProgram = do
+  progs <- getProgChunks
+  let prog = case progs of
+               (p:ps) -> p
+               []     -> Empty
+  mb_sym <- getInfoUnit Symbol
+  let sym = fromJust mb_sym
+  state $ \info -> ((prog, sym), info)
+
 -- | Make a program of inference rule
-make :: Rule -> State Info () -> Program
-make rule = head . program . (`execState` Compiler.Info.init rule)
+make :: Rule -> State Info (Program, LSymbol) -> (Program, LSymbol)
+make rule = (`evalState` initInfo rule)
 
 -- | Compile an inference rule
 compile :: Rule -> IO ()
 compile rule = do
   let file = "database/programs"
-  let prog = make rule $ do prepFilters
-                            prepSpecifiers
-                            prepTheorem
-                            makeIdentProg
-                            makeFilterProg
-                            makeCheckProg
-                            makeReplaceProg
-  saveProgram (symbol rule) Empty file
+  let (prog, sym) = make rule $ do prepFilters
+                                   prepSpecifiers
+                                   prepTheorem
+                                   makeIdentProg
+                                   makeFilterProg
+                                   makeCheckProg
+                                   makeReplaceProg
+                                   linkProgram
+  saveProgram sym prog file

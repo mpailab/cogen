@@ -127,4 +127,4 @@ putProgram = DB.insert
 saveProgram :: LSymbol -> Program -> String -> IO ()
 saveProgram sym prog dir = do
   createDirectoryIfMissing True dir
-  writeFile (dir ++ show sym ++ ".db") (show prog)
+  writeFile (dir ++ "/" ++ show sym ++ ".db") (show prog)

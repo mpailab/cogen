@@ -13,7 +13,11 @@ module Compiler.Info
     (
       -- exports
       Info(..), Unit(..),
-      Compiler.Info.init, addUnit, getRule
+      initInfo,
+      getRule,
+      newProgVar,
+      getInfoUnit, addInfoUnit,
+      getProgChunks, addProgChunk
     )
 where
 
@@ -33,14 +37,20 @@ type Units = Map.Map LSymbol Unit
 -- | Type of information structure in compiler
 data Info = Info
   {
-    rule     :: Rule,     -- ^ compiled rule
-    variable :: Int,      -- ^ number of first free program variable
-    units    :: Units,    -- ^ table of information units
-    program  :: [Program] -- ^ list of program fragments
+    rule   :: Rule,     -- ^ compiled rule
+    varnum :: Int,      -- ^ number of first free program variable
+    units  :: Units,    -- ^ table of information units
+    chunks :: [Program] -- ^ list of program fragments
   }
 
-init :: Rule -> Info
-init rule = Info rule 1 initUnits []
+initInfo :: Rule -> Info
+initInfo rule = Info rule 1 Map.empty []
+
+getRule :: State Info Rule
+getRule = state $ \info -> (rule info, info)
+
+newProgVar :: State Info LSymbol
+newProgVar = state $ \info -> let n = varnum info in (P n, info {varnum = n + 1})
 
 -- | Type of information units
 data Unit = I Int
@@ -51,59 +61,56 @@ data Unit = I Int
           | TS [Term]
           | EmptyUnit
 
-  -- -- | List of bound variables in theorem of rule
-  -- = BoundVars { vars :: [LSymbol] }
-  --
-  -- -- | Substituted term in theorem of rule
-  -- | From { from :: Term }
-  --
-  -- -- | List of premises in theorem of rule
-  -- | Premises { premises :: [Term] }
-  --
-  -- | Root
-  --   {
-  --     root :: Int -- ^ number of program variable representing
-  --                 --   a reference to the root of identified term
-  --   }
-  --
-  -- -- | Current inference rule
-  -- | Rule { rule :: Rule }
-  --
-  -- -- | Binding symbol of current rule
-  -- | Symbol { symbol :: LSymbol }
-  --
-  -- -- | Substituting term in theorem of rule
-  -- | To { to :: Term }
-  --
-  -- -- | Empty represents an auxiliary information unit
-  -- | Empty
+class GetUnit a where
+  getInfoUnit :: LSymbol -> State Info (Maybe a)
 
-initUnits :: Units
-initUnits = Map.empty
+instance GetUnit Int where
+  getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(I n) -> n) x, info)
+
+instance GetUnit LSymbol where
+  getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(S s) -> s) x, info)
+
+instance GetUnit Term where
+  getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(T t) -> t) x, info)
+
+instance GetUnit [Int] where
+  getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(IS ns) -> ns) x, info)
+
+instance GetUnit [LSymbol] where
+  getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(SS ss) -> ss) x, info)
+
+instance GetUnit [Term] where
+  getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(TS ts) -> ts) x, info)
+
+getUnit :: LSymbol -> State Info (Maybe Unit)
+getUnit sym = state $ \info -> (Map.lookup sym (units info), info)
 
 class AddUnit a where
-  addUnit :: LSymbol -> a -> State Info ()
+  addInfoUnit :: LSymbol -> a -> State Info ()
 
 instance AddUnit Int where
-  addUnit sym n = addUnitInternal sym $ I n
+  addInfoUnit sym n = addUnit sym $ I n
 
 instance AddUnit LSymbol where
-  addUnit sym s = addUnitInternal sym $ S s
+  addInfoUnit sym s = addUnit sym $ S s
 
 instance AddUnit Term where
-  addUnit sym t = addUnitInternal sym $ T t
+  addInfoUnit sym t = addUnit sym $ T t
 
 instance AddUnit [Int] where
-  addUnit sym ns = addUnitInternal sym $ IS ns
+  addInfoUnit sym ns = addUnit sym $ IS ns
 
 instance AddUnit [LSymbol] where
-  addUnit sym ss = addUnitInternal sym $ SS ss
+  addInfoUnit sym ss = addUnit sym $ SS ss
 
 instance AddUnit [Term] where
-  addUnit sym ts = addUnitInternal sym $ TS ts
+  addInfoUnit sym ts = addUnit sym $ TS ts
 
-addUnitInternal :: LSymbol -> Unit -> State Info ()
-addUnitInternal sym unit = modify (\info -> info { units = Map.insert sym unit (units info) })
+addUnit :: LSymbol -> Unit -> State Info ()
+addUnit sym unit = modify (\info -> info { units = Map.insert sym unit (units info) })
 
-getRule :: State Info Rule
-getRule = state $ \info -> (rule info, info)
+getProgChunks :: State Info [Program]
+getProgChunks = state $ \info -> (chunks info, info)
+
+addProgChunk :: Program -> State Info ()
+addProgChunk prog = modify (\info -> info { chunks = chunks info ++ [prog] })
