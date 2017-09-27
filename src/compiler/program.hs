@@ -76,7 +76,29 @@ data Program
   -- | Empty represents an auxiliary program instruction
   | Empty
 
-  deriving(Eq, Read, Show)
+  deriving(Eq, Read)
+
+-- Show instance for Program
+instance Show Program where
+  show prog = show_ prog ""
+
+show_ :: Program -> String -> String
+
+show_ (Assign vl v g c p) ind =
+  ind ++ show (Var $ P v) ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ show_ p ind
+
+show_  (Branch vl c b p) ind =
+  ind ++ show c ++ "\n" ++ show_ b (ind ++ "  ") ++ show_ p ind
+
+show_ (Switch vl e cl p) ind =
+  foldl f (ind ++ "case " ++ show e ++ " of\n") $ zip cl [1 .. length cl]
+  where
+    f :: String -> (Program, Int) -> String
+    f x (y,i) = x ++ ind ++ show i ++ " -> " ++ show_ y (ind ++ "     ")
+
+show_ (Action vl t) ind = ind ++ show t
+
+show_ Empty ind = ""
 
 -- | Type of programs database
 type Database = DB.Map LSymbol Program

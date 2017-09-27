@@ -22,6 +22,10 @@ where
 data LSymbol = P Int                    -- ^ program variable
              | X Int                    -- ^ theorem variable
              | C Int                    -- ^ constants
+             | And                      -- ^ Term: logical and
+             | BindOccur                -- ^ Compiler: occurrence of the binding symbol
+                                        -- ^           in substituted term
+             | BindSymbol               -- ^ Compiler: binding symbol of rule
              | Bounds                   -- ^ Compiler: list of bouned variables
                                         --             in the theorem of rule
              | Context                  -- ^
@@ -30,17 +34,20 @@ data LSymbol = P Int                    -- ^ program variable
              | Forall                   -- ^
              | From                     -- ^ Compiler: substituted term
                                         --             in the theorem of rule
+             | Header                   -- ^ Term: function symbol of term
              | If                       -- ^ Term: symbol in if-then statement
              | LeftToRight              -- ^ Rule: header of rule
              | Level                    -- ^
-             | Negation                 -- ^
+             | Neg                      -- ^ Term: logical negation
+             | Operand                  -- ^
              | Operands                 -- ^
              | Plus                     -- ^
              | Premises                 -- ^ Compiler: list of premises
                                         --             in the theorem of rule
+             | Replacing                -- ^
              | RightToLeft              -- ^ Rule: header of rule
-             | Symbol                   -- ^ Compiler: binding symbol of rule
              | Then                     -- ^ Term: symbol in if-then statement
+             | LTrue                    -- ^ Term: logical constant true
              | To                       -- ^ Compiler: substituting term
                                         --             in the theorem of rule
              deriving (Eq, Ord, Read, Show)

@@ -16,8 +16,9 @@ module Term
     (
       -- exports
       Term, Tree(..),
-      header,
+      header, operands, subterms,
       drawTerm,
+      getVarNum,
       isContainLSymbol
     )
 where
@@ -45,7 +46,7 @@ instance Show Term where
   show (Var (X x))   = "$x" ++ show x
   show (Const (C x)) = show x
   show (Const x)     = show x
-  show (s :> l)      = show s ++ "[" ++ sumstr [show x | x <- l] ++ "]"
+  show (s :> l)      = show s ++ "[" ++ sumstr (map show l) ++ "]"
     where
       sumstr []      = ""
       sumstr [a]     = a
@@ -128,6 +129,16 @@ instance ITerm Term where
 
   -- Get subterms list of term
   subterms t =  t : concatMap subterms (operands t)
+
+class VarNum a where
+  getVarNum :: a -> Int
+
+instance VarNum LSymbol where
+  getVarNum (P n) = n
+  getVarNum (X n) = n
+
+instance VarNum Term where
+  getVarNum (Var x) = getVarNum x
 
 -- | Does a term contain a logical symbol
 isContainLSymbol :: Term -> LSymbol -> Bool

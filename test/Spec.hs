@@ -19,7 +19,7 @@ test :: Integer -> IO Bool
 test num = case num of
   1 -> do
     let sym = Plus
-    let thrm = Forall :> [Var (X 1), Var (X 2), Var (X 3), Equivalence :> [Equal :> [Plus :> [Var (X 1), Var (X 2)], Plus :> [Negation :> [Var (X 1)], Var (X 3)]], Equal :> [Var (X 2), Negation :> [Var (X 3)]]]]
+    let thrm = Forall :> [Var (X 1), Var (X 2), Var (X 3), Equivalence :> [Equal :> [Plus :> [Var (X 1), Var (X 2)], Plus :> [Neg :> [Var (X 1)], Var (X 3)]], Equal :> [Var (X 2), Neg :> [Var (X 3)]]]]
     let h = Const LeftToRight
     let rule = Rule sym thrm h [Level :> [Var (X 3)]] [Var (X 3)] [Var (X 3)]
     writeFile "tmp/test1.txt" (show rule)

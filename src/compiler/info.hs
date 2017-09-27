@@ -15,7 +15,7 @@ module Compiler.Info
       Info(..), Unit(..),
       initInfo,
       getRule,
-      newProgVar,
+      newProgVar, newProgVarNum, getProgVarNum,
       getInfoUnit, addInfoUnit,
       getProgChunks, addProgChunk
     )
@@ -24,6 +24,7 @@ where
 -- External imports
 import           Control.Monad.State
 import qualified Data.Map            as Map
+import           Data.Maybe
 
 -- Internal imports
 import           Compiler.Program
@@ -44,13 +45,25 @@ data Info = Info
   }
 
 initInfo :: Rule -> Info
-initInfo rule = Info rule 1 Map.empty []
+initInfo rule = Info rule 2 Map.empty []
 
 getRule :: State Info Rule
 getRule = state $ \info -> (rule info, info)
 
 newProgVar :: State Info LSymbol
 newProgVar = state $ \info -> let n = varnum info in (P n, info {varnum = n + 1})
+
+newProgVarNum :: State Info Int
+newProgVarNum = state $ \info -> let n = varnum info in (n, info {varnum = n + 1})
+
+getProgVarNum :: Term -> State Info Int
+getProgVarNum (Var (x@(X _))) = state (\info ->
+  let mb_n = fmap (\(I n) -> n) (Map.lookup x (units info))
+      is_just = isJust mb_n
+      cur_n = varnum info
+      n = if is_just then fromJust mb_n else cur_n
+  in (n, info {varnum = if is_just then cur_n else n + 1}))
+getProgVarNum _ = newProgVarNum
 
 -- | Type of information units
 data Unit = I Int

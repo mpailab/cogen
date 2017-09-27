@@ -21,6 +21,7 @@ where
 import           Control.Monad
 import           Control.Monad.State
 import           Data.List
+import           Data.List.Utils
 import           Data.Maybe
 
 -- Internal imports
@@ -83,7 +84,7 @@ modifyTheorem = modify id
 bindTheorem :: State Info ()
 bindTheorem = do
   rule <- getRule
-  addInfoUnit Symbol (symbol rule)
+  addInfoUnit BindSymbol (symbol rule)
 
 -- | Prepare the theorem of inference rule
 prepTheorem :: State Info ()
@@ -97,9 +98,42 @@ prepFilters = modify id
 prepSpecifiers :: State Info ()
 prepSpecifiers = modify id
 
+-- | Identify a term
+identTerm :: Term          -- ^ theorem's term
+          -> Int           -- ^ number of program variable of the term
+          -> State Info () -- ^ information structure
+
+-- Case of theorem's variable
+identTerm (Var x) n = do
+  mb_m <- getInfoUnit x
+  if isJust mb_m
+    then let m = fromJust mb_m
+         in addProgChunk (Branch [m, n] (Equal :> [Var $ P m, Var $ P n]) Empty Empty)
+    else addInfoUnit x n
+
+-- General case
+identTerm t n  = do
+  let p = P n
+  let v = Var p
+  addProgChunk (Branch [n] (Equal :> [Header :> [v], Const (Term.header t)]) Empty Empty)
+  foldM_ (\prevs st ->
+    do
+      m <- newProgVarNum
+      addInfoUnit (P m) (Operand :> [v])
+      addProgChunk (Assign [n] m (Operands :> [v]) (cond prevs m) Empty)
+      identTerm st m
+      return (prevs ++ [m]))
+    [] (operands t)
+  where
+    cond []  _ = Const LTrue
+    cond [j] i = Neg :> [Equal :> [Var $ P i, Var $ P j]]
+    cond  s  i = And :> map (\j -> Neg :> [Equal :> [Var $ P i, Var $ P j]]) s
+
 -- | Make an identifying program of inference rule
 makeIdentProg :: State Info ()
-makeIdentProg = modify id
+makeIdentProg = do
+  t <- getInfoUnit From
+  identTerm (fromJust t) 1
 
 -- | Make a filtering program of inference rule
 makeFilterProg :: State Info ()
@@ -109,18 +143,65 @@ makeFilterProg = modify id
 makeCheckProg :: State Info ()
 makeCheckProg = modify id
 
+replaceTerm :: Term            -- ^ theorem's term
+            -> [Int]
+            -> State Info (Term, [Int]) -- ^ information structure
+
+-- Case of theorem's variable
+replaceTerm (Var x) s = do
+  mb_n <- getInfoUnit x
+  let n = fromJust mb_n
+  state $ \info -> ((Var $ P n, n:s), info)
+
+-- Case of constant
+replaceTerm t@(Const _) s = state $ \info -> ((t,s), info)
+
+-- General case
+replaceTerm t s = do
+  x <- forM (operands t) (`replaceTerm` s)
+  let (ts,vs) = unzip x
+  state $ \info -> ((Term.header t :> ts, concat vs), info)
+
 -- | Make a replacing program of inference rule
 makeReplaceProg :: State Info ()
-makeReplaceProg = modify id
+makeReplaceProg = do
+  t <- getInfoUnit To
+  (pt,vs) <- replaceTerm (fromJust t) []
+  addProgChunk (Action (sort $ uniq vs) (Replacing :> [pt]))
+
+linkProgChunks :: [Program] -> State Info Program
+
+linkProgChunks (Assign vl v g c Empty : Branch _ bc Empty Empty : ps) = do
+  let new_c = case c of
+                And :> ts   -> And :> (ts ++ [bc])
+                Const LTrue -> bc
+                _           -> And :> [c, bc]
+  linkProgChunks (Assign vl v g new_c Empty : ps)
+
+linkProgChunks (Assign vl v g c Empty : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Assign vl v g c prog, info)
+
+linkProgChunks (Branch vl c Empty Empty : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Branch vl c prog Empty, info)
+
+linkProgChunks (Switch vl e cl Empty : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Switch vl e cl prog, info)
+
+linkProgChunks (Action vl t : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Action vl t, info)
+
+linkProgChunks [] = state $ \info -> (Empty, info)
 
 -- | Link program fragments of inference rule
 linkProgram :: State Info (Program, LSymbol)
 linkProgram = do
-  progs <- getProgChunks
-  let prog = case progs of
-               (p:ps) -> p
-               []     -> Empty
-  mb_sym <- getInfoUnit Symbol
+  chunks <- getProgChunks
+  prog <- linkProgChunks chunks
+  mb_sym <- getInfoUnit BindSymbol
   let sym = fromJust mb_sym
   state $ \info -> ((prog, sym), info)
 
