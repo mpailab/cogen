@@ -21,8 +21,9 @@ library
                        LSymbol
                        Rule
                        Term
-  build-depends:       base >= 4.7 && < 5
-                     , containers, strict, mtl, directory, filepath, MissingH
+  build-depends:       base >= 4.7 && < 5,
+                       containers, strict, mtl, directory, filepath, MissingH,
+                       array
   default-language:    Haskell2010
 
 executable cogen-exe
