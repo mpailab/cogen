@@ -9,7 +9,7 @@ Portability : POSIX
 
 A program in compiler is a collection of instructions that organizes as a tree
 in which every node represents an instruction performing a specific task.
-Each task is described from programs terms. All instructions contain
+Each task is described by programs terms. Every instruction contains
 a list of numbers of depended program variables and jump to the next program
 fragment (except the acting instruction which is a terminal of program).
 -}
