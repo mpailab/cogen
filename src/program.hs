@@ -1,21 +1,18 @@
 {-|
-Module      : Compiler.Program
-Description : Representation of programs in compiler
+Module      : Program
+Description : Representation of programs
 Copyright   : (c) Grigoriy Bokov, 2017
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 
-A program in compiler is a collection of instructions that organizes as a tree
-in which every node represents an instruction performing a specific task.
-Each task is described by programs terms. Every instruction contains
-a list of numbers of depended program variables and jump to the next program
-fragment (except the acting instruction which is a terminal of program).
+A program is a collection of instructions that organizes as a tree in which every node represents an instruction performing a specific task. Each task is described by programs terms. Every instruction contains a list of numbers of depended program variables and jump to the next program fragment (except the acting instruction which is a terminal of program).
 -}
-module Compiler.Program
+module Program
     (
       -- exports
+      Program.Symbol,
       Program(..),
       openProgramDB, closeProgramDB, getProgram, putProgram, loadProgram, saveProgram
     )
@@ -24,14 +21,14 @@ where
   -- External imports
 import           Control.Exception
 import           Control.Monad
-import qualified Data.Map          as DB
+import qualified Data.Map          as M
 import           System.Directory
 import           System.FilePath
 import           System.IO
 
 -- Internal imports
-import           LSymbol
-import           Term
+import           Program.Symbol
+import qualified Symbol            as L
 
 -- | Type of program in compiler
 data Program
@@ -42,8 +39,8 @@ data Program
     {
       variables :: [Int],  -- ^ list of numbers of depended program variables
       variable  :: Int,    -- ^ number of a program variable
-      generate  :: Term,   -- ^ generator of terms
-      condition :: Term,   -- ^ condition for iterating of terms
+      generate  :: PTerm,  -- ^ generator of terms
+      condition :: PTerm,  -- ^ condition for iterating of terms
       jump      :: Program -- ^ jump to next program fragment
     }
 
@@ -52,7 +49,7 @@ data Program
   | Branch
     {
       variables :: [Int],   -- ^ list of numbers of depended program variables
-      condition :: Term,    -- ^ condition for the branch
+      condition :: PTerm,   -- ^ condition for the branch
       branch    :: Program, -- ^ branch to program fragment
       jump      :: Program  -- ^ jump to next program fragment
     }
@@ -61,7 +58,7 @@ data Program
   | Switch
     {
       variables :: [Int],     -- ^ list of numbers of depended program variables
-      evaluate  :: Term,      -- ^ evaluation of number of program unit
+      evaluate  :: PTerm,     -- ^ evaluation of number of program unit
       cases     :: [Program], -- ^ list of program units
       jump      :: Program    -- ^ jump to next program fragment
     }
@@ -70,7 +67,7 @@ data Program
   | Action
     {
       variables :: [Int], -- ^ list of numbers of depended program variables
-      perform   :: Term   -- ^ performing of an action
+      perform   :: PTerm  -- ^ performing of an action
     }
 
   -- | Empty represents an auxiliary program instruction
@@ -85,7 +82,7 @@ instance Show Program where
 show_ :: Program -> String -> String
 
 show_ (Assign vl v g c p) ind =
-  ind ++ show (Var $ P v) ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ show_ p ind
+  ind ++ show (var v) ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ show_ p ind
 
 show_  (Branch vl c b p) ind =
   ind ++ show c ++ "\n" ++ show_ b (ind ++ "  ") ++ show_ p ind
@@ -101,17 +98,17 @@ show_ (Action vl t) ind = ind ++ show t
 show_ Empty ind = ""
 
 -- | Type of programs database
-type Database = DB.Map LSymbol Program
+type Programs = M.Map Int Program
 
 -- | Initialize a database from one saved in given directory
-openProgramDB :: String -> IO Database
+openProgramDB :: String -> IO Programs
 openProgramDB dir = do
   dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
   case dir_content of
-     Left _            -> return DB.empty
-     Right dir_content -> foldM f DB.empty dir_content
+     Left _            -> return M.empty
+     Right dir_content -> foldM f M.empty dir_content
      where
-       f :: Database -> FilePath -> IO Database
+       f :: Programs -> FilePath -> IO Programs
        f db file = do
          content <- try (readFile file) :: IO (Either IOError FilePath)
          case content of
@@ -119,22 +116,22 @@ openProgramDB dir = do
             Right content -> return (putProgram (read $ takeBaseName file) (read content) db)
 
 -- | Close a database and save it in given directory
-closeProgramDB :: Database -> String -> IO ()
+closeProgramDB :: Programs -> String -> IO ()
 closeProgramDB db dir = do
   createDirectoryIfMissing True dir
-  mapM_ f (DB.assocs db)
+  mapM_ f (M.assocs db)
   where
-    f :: (LSymbol, Program) -> IO ()
+    f :: (L.Symbol, Program) -> IO ()
     f (sym, prog) = writeFile (dir ++ show sym ++ ".db") (show prog)
 
 -- | Get a program of logical symbol from a database
-getProgram :: LSymbol -> Database -> Maybe Program
-getProgram sym db = case DB.lookup sym db of
+getProgram :: L.Symbol -> Programs -> Maybe Program
+getProgram sym db = case M.lookup sym db of
   Just prog -> return prog
   Nothing   -> return Empty
 
 -- | Load a program of logical symbol from a database saved in given directory
-loadProgram :: LSymbol -> String -> IO Program
+loadProgram :: L.Symbol -> String -> IO Program
 loadProgram sym dir = do
   content <- try (readFile (dir ++ show sym ++ ".db")) :: IO (Either IOError FilePath)
   case content of
@@ -142,11 +139,11 @@ loadProgram sym dir = do
     Right content -> return (read content)
 
 -- | Put a program of logical symbol to a database
-putProgram :: LSymbol -> Program -> Database -> Database
-putProgram = DB.insert
+putProgram :: L.Symbol -> Program -> Programs -> Programs
+putProgram = M.insert
 
 -- | Save a program of logical symbol to a database saved in given directory
-saveProgram :: LSymbol -> Program -> String -> IO ()
+saveProgram :: L.Symbol -> Program -> String -> IO ()
 saveProgram sym prog dir = do
   createDirectoryIfMissing True dir
   writeFile (dir ++ "/" ++ show sym ++ ".db") (show prog)

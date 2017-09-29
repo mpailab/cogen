@@ -3,40 +3,34 @@ Symbol {
   id                = 1,
   name              = "if",
   synonyms          = [],
-  inner             = False,
-  los               = True,
-  categories        = [],
-  description       = ""
+  categories        = ["Term"],
+  description       = "Logical symbol in the if-then statement"
 },
 Symbol {
   id                = 2,
   name              = "then",
   synonyms          = [],
-  los               = True,
-  categories        = [],
-  description       = ""
+  categories        = ["Term"],
+  description       = "Logical symbol in the if-then statement"
 },
 Symbol {
   id                = 3,
   name              = "equal",
   synonyms          = ["=="],
-  los               = True,
-  categories        = [],
-  description       = ""
+  categories        = ["Term"],
+  description       = "Logical symbol for the equality"
 },
 Symbol {
   id                = 4,
   name              = "forall",
   synonyms          = [""],
-  los               = True,
-  categories        = [],
-  description       = ""
+  categories        = ["Term"],
+  description       = "Logical symbol for the universal quantifier"
 },
 Symbol {
   id                = 5,
   name              = "right-to-left",
   synonyms          = ["firstsubterm"],
-  los               = True,
   categories        = ["Rule.Header"],
   description       = "Theorem header for right-to-left replacing of terms"
 
@@ -45,7 +39,6 @@ Symbol {
   id                = 6,
   name              = "left-to-right",
   synonyms          = ["secondsubterm"],
-  los               = True,
   categories        = ["Rule.Header"],
   description       = "Theorem header for left-to-right replacing of terms"
 },
@@ -53,7 +46,6 @@ Symbol {
   id                = 7,
   name              =  "context",
   synonyms          = ["kontekst"],
-  los               = True,
   categories        = ["Rule.Filter", "Rule.Specifier"],
   description       = ""
 }

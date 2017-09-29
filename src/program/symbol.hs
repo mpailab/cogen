@@ -2,15 +2,15 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 {-|
-Module      : Compiler.Program.Symbol
-Description : Program symbols and terms in compiler
+Module      : Program.Symbol
+Description : Program symbols and terms
 Copyright   : (c) Grigoriy Bokov, 2017
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 
-Program symbols are special symbol used in compiler for composing of program terms which are base elements of programs.
+Program symbols are special symbol used for composing of program terms which are base elements of programs.
 
 In order to add new program symbol need:
   1. add new constructor in data Symbol,
@@ -21,17 +21,18 @@ In order to add new program symbol need:
 Warning: Constructors of program symbols are private, do not exporte it.
          Try use composing and evaluating functions for this.
 -}
-module Compiler.Program.Symbol
+module Program.Symbol
     (
       -- exports
       Symbol, PTerm,
       var, cons,
-      Compiler.Program.Symbol.not,
-      Compiler.Program.Symbol.and,
-      Compiler.Program.Symbol.or,
-      equal, nequal,
-      Compiler.Program.Symbol.header,
-      Compiler.Program.Symbol.args,
+      Program.Symbol.not,
+      Program.Symbol.and,
+      Program.Symbol.or,
+      Program.Symbol.eq,
+      Program.Symbol.neq,
+      Program.Symbol.header,
+      Program.Symbol.args,
       eval
     )
 where
@@ -180,28 +181,36 @@ not t              = Not :> [t]
 -- | Take the logical and of a given program terms
 and :: [PTerm] -> PTerm
 and [t] = t
-and (t:s) = And :> case (t, Compiler.Program.Symbol.and s) of
-  (And :> xs, And :> ys) -> xs ++ ys
-  (And :> xs, y)         -> xs ++ [y]
-  (x, And :> ys)         -> x : ys
-  (x, y)                 -> [x, y]
+and (t:s) = And :> case (t, Program.Symbol.and s) of
+  (Const (B True), y)      -> [y]
+  (x@(Const (B False)), y) -> [x]
+  (x, Const (B True))      -> [x]
+  (x, y@(Const (B False))) -> [y]
+  (And :> xs, And :> ys)   -> xs ++ ys
+  (And :> xs, y)           -> xs ++ [y]
+  (x, And :> ys)           -> x : ys
+  (x, y)                   -> [x, y]
 
 -- | Take the logical or of a given program terms
 or :: [PTerm] -> PTerm
 or [t] = t
-or (t:s) = Or :> case (t, Compiler.Program.Symbol.or s) of
-  (Or :> xs, Or :> ys) -> xs ++ ys
-  (Or :> xs, y)        -> xs ++ [y]
-  (x, Or :> ys)        -> x : ys
-  (x, y)               -> [x, y]
+or (t:s) = Or :> case (t, Program.Symbol.or s) of
+  (x@(Const (B True)), y) -> [x]
+  (Const (B False), y)    -> [y]
+  (x, y@(Const (B True))) -> [y]
+  (x, Const (B False))    -> [x]
+  (Or :> xs, Or :> ys)    -> xs ++ ys
+  (Or :> xs, y)           -> xs ++ [y]
+  (x, Or :> ys)           -> x : ys
+  (x, y)                  -> [x, y]
 
 -- | Return a program term which is the equality of a given program terms
-equal :: PTerm -> PTerm -> PTerm
-equal x y = Equal :> [x,y]
+eq :: PTerm -> PTerm -> PTerm
+eq x y = Equal :> [x,y]
 
 -- | Return a program term which is the negation of equality of a given program terms
-nequal :: PTerm -> PTerm -> PTerm
-nequal x y = NEqual :> [x,y]
+neq :: PTerm -> PTerm -> PTerm
+neq x y = NEqual :> [x,y]
 
 -- | Return a program term which is the header of a given program term
 header :: PTerm -> PTerm
