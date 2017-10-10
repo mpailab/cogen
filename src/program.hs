@@ -12,15 +12,15 @@ A program is a collection of instructions that organizes as a tree in which ever
 module Program
     (
       -- exports
-      Program.PSymbol,
-      Program(..),
-      openProgramDB, closeProgramDB, getProgram, putProgram, loadProgram, saveProgram
+      PSymbol,
+      Program(..)
     )
 where
 
   -- External imports
 import           Control.Exception
 import           Control.Monad
+import           Data.Char
 import qualified Data.Map          as M
 import           System.Directory
 import           System.FilePath
@@ -76,14 +76,10 @@ data Program
   -- | Empty represents an auxiliary program instruction
   | Empty
 
-  deriving(Eq, Read)
+  deriving(Eq)
 
 -- | Type of programs database
 type Programs = M.Map Int Program
-
--- Default indent in string representation of programs
-indent :: String
-indent = "  "
 
 ------------------------------------------------------------------------------------------
 -- Show instances
@@ -94,17 +90,17 @@ instance Show Program where
 
 show_ :: Program -> String -> String
 
-show_ (Assign vl v g c p) ind =
-  ind ++ show (var v) ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ show_ p ind
+show_ (Assign vl v g c p) ind = let x = var v :: PSymbol
+  in ind ++ show v ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ show_ p ind
 
 show_  (Branch vl c b p) ind =
-  ind ++ show c ++ "\n" ++ show_ b (ind ++ indent) ++ show_ p ind
+  ind ++ show c ++ "\n" ++ show_ b (' ':' ':ind) ++ show_ p ind
 
 show_ (Switch vl e cl p) ind =
   foldl f (ind ++ "case " ++ show e ++ " of\n") $ zip cl [1 .. length cl]
   where
     f :: String -> (Program, Int) -> String
-    f x (y,i) = x ++ ind ++ show i ++ " -> " ++ show_ y (ind ++ "     ")
+    f x (y,i) = x ++ (' ':ind) ++ show i ++ ":\n" ++ show_ y (' ':' ':ind)
 
 show_ (Action vl t) ind = ind ++ show t
 
@@ -115,11 +111,70 @@ show_ Empty ind = ""
 
 -- Read instance for Program
 instance Read Program where
-  readsPrec p r = read_ r indent
+  readsPrec p = readProgram p 0
 
-read_ :: Int -> String -> ReadS [Program]
-read_ p ind r = [ (x,t) | (str,s) <- lex r,
-                              (x,t) <- readParen True (readsPrec p) s ]
+readProgram :: Int -> Int -> ReadS Program
+readProgram p ind r =  readAssign p ind r
+                    ++ readBranch p ind r
+                    ++ readSwitch p ind r
+                    ++ readAction p ind r
+                    ++ readEmpty  p ind r
+
+readAssign :: Int -> Int -> ReadS Program
+readAssign i ind r =
+  [ (Assign [] (eval x) g c p, w) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
+                                    (x, ' ':'<':'-':' ':t) <- readPSymbol i s,
+                                    (g, ' ':'|':' ':u) <- readPTerm i t,
+                                    (c, '\n':v) <- readPTerm i u,
+                                    (p, w) <- readProgram i ind v ]
+
+readBranch :: Int -> Int -> ReadS Program
+readBranch i ind r =
+  [ (Branch [] c b p, v) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
+                           (c, '\n':t) <- readPTerm i s,
+                           (b, u) <- readProgram i (ind+2) t,
+                           (p, v) <- readProgram i ind u ]
+
+readSwitchCases :: Int -> Int -> ReadS [Program]
+readSwitchCases i ind r =  [ (p:cl, v) | (' ':s@(a:_)) <- [skipSpaces r ind], isDigit a,
+                                         (x, ':':'\n':t) <- lex s, all isDigit x,
+                                         (p, u) <- readProgram i (ind+2) t,
+                                         (cl, v) <- readSwitchCases i ind u ]
+                        ++ [ ([], r) | (a:s) <- [skipSpaces r ind],  a /= ' ' ]
+
+readSwitch :: Int -> Int -> ReadS Program
+readSwitch i ind r =
+  [ (Switch [] e cl p, v) | ('c':'a':'s':'e':' ':s) <- [skipSpaces r ind],
+                            (e, ' ':'o':'f':'\n':t) <- readPTerm i s,
+                            (cl, u) <- readSwitchCases i ind t,
+                            (p, v) <- readProgram i ind u  ]
+
+readAction :: Int -> Int -> ReadS Program
+readAction i ind r =
+  [ (Action [] t, u) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
+                       (t, '\n':u) <- readPTerm i s, isAction t ]
+
+readEmpty :: Int -> Int -> ReadS Program
+readEmpty i ind "" = [(Empty, "")]
+
+skipSpaces :: String -> Int -> String
+skipSpaces str 0       = str
+skipSpaces (' ':str) n = skipSpaces str (n-1)
+
+-- import Text.Parsec hiding (State)
+-- import Text.Parsec.Indent
+-- import Control.Monad.State
+--
+-- type ProgramParser = ParsecT String () (State SourcePos) Program
+--
+-- parse :: ProgramParser -> String -> Either ParseError Program
+-- parse p str = runIndent "" $ runParserT p () "" str
+--
+-- aProgram :: ProgramParser
+-- aProgram = do
+--   b <- withBlock NamedList aName anItem
+--   spaces
+--   return b
 
 -- An example of how to parse an indented tree of data in Haskell using Parsec and indents.
 --
@@ -186,51 +241,51 @@ read_ p ind r = [ (x,t) | (str,s) <- lex r,
 
 ------------------------------------------------------------------------------------------
 -- Functions
-
--- | Initialize a database from one saved in given directory
-openProgramDB :: String -> IO Programs
-openProgramDB dir = do
-  dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
-  case dir_content of
-     Left _            -> return M.empty
-     Right dir_content -> foldM f M.empty dir_content
-     where
-       f :: Programs -> FilePath -> IO Programs
-       f db file = do
-         content <- try (readFile file) :: IO (Either IOError FilePath)
-         case content of
-            Left _        -> return db
-            Right content -> return (putProgram (read $ takeBaseName file) (read content) db)
-
--- | Close a database and save it in given directory
-closeProgramDB :: Programs -> String -> IO ()
-closeProgramDB db dir = do
-  createDirectoryIfMissing True dir
-  mapM_ f (M.assocs db)
-  where
-    f :: (L.Symbol, Program) -> IO ()
-    f (sym, prog) = writeFile (dir ++ show sym ++ ".db") (show prog)
-
--- | Get a program of logical symbol from a database
-getProgram :: L.Symbol -> Programs -> Maybe Program
-getProgram sym db = case M.lookup sym db of
-  Just prog -> return prog
-  Nothing   -> return Empty
-
--- | Load a program of logical symbol from a database saved in given directory
-loadProgram :: L.Symbol -> String -> IO Program
-loadProgram sym dir = do
-  content <- try (readFile (dir ++ show sym ++ ".db")) :: IO (Either IOError FilePath)
-  case content of
-    Left _        -> return Empty
-    Right content -> return (read content)
-
--- | Put a program of logical symbol to a database
-putProgram :: L.Symbol -> Program -> Programs -> Programs
-putProgram = M.insert
-
--- | Save a program of logical symbol to a database saved in given directory
-saveProgram :: L.Symbol -> Program -> String -> IO ()
-saveProgram sym prog dir = do
-  createDirectoryIfMissing True dir
-  writeFile (dir ++ "/" ++ show sym ++ ".db") (show prog)
+--
+-- -- | Initialize a database from one saved in given directory
+-- openProgramDB :: String -> IO Programs
+-- openProgramDB dir = do
+--   dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
+--   case dir_content of
+--      Left _            -> return M.empty
+--      Right dir_content -> foldM f M.empty dir_content
+--      where
+--        f :: Programs -> FilePath -> IO Programs
+--        f db file = do
+--          content <- try (readFile file) :: IO (Either IOError FilePath)
+--          case content of
+--             Left _        -> return db
+--             Right content -> return (putProgram (read $ takeBaseName file) (read content) db)
+--
+-- -- | Close a database and save it in given directory
+-- closeProgramDB :: Programs -> String -> IO ()
+-- closeProgramDB db dir = do
+--   createDirectoryIfMissing True dir
+--   mapM_ f (M.assocs db)
+--   where
+--     f :: (L.Symbol, Program) -> IO ()
+--     f (sym, prog) = writeFile (dir ++ show sym ++ ".db") (show prog)
+--
+-- -- | Get a program of logical symbol from a database
+-- getProgram :: L.Symbol -> Programs -> Maybe Program
+-- getProgram sym db = case M.lookup sym db of
+--   Just prog -> return prog
+--   Nothing   -> return Empty
+--
+-- -- | Load a program of logical symbol from a database saved in given directory
+-- loadProgram :: L.Symbol -> String -> IO Program
+-- loadProgram sym dir = do
+--   content <- try (readFile (dir ++ show sym ++ ".db")) :: IO (Either IOError FilePath)
+--   case content of
+--     Left _        -> return Empty
+--     Right content -> return (read content)
+--
+-- -- | Put a program of logical symbol to a database
+-- putProgram :: L.Symbol -> Program -> Programs -> Programs
+-- putProgram = M.insert
+--
+-- -- | Save a program of logical symbol to a database saved in given directory
+-- saveProgram :: L.Symbol -> Program -> String -> IO ()
+-- saveProgram sym prog dir = do
+--   createDirectoryIfMissing True dir
+--   writeFile (dir ++ "/" ++ show sym ++ ".db") (show prog)

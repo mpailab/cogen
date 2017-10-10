@@ -25,6 +25,7 @@ module Program.PSymbol
     (
       -- exports
       PSymbol, PTerm,
+      readPSymbol, readPTerm,
       var, cons,
       Program.PSymbol.not,
       Program.PSymbol.and,
@@ -33,7 +34,8 @@ module Program.PSymbol
       Program.PSymbol.neq,
       Program.PSymbol.header,
       Program.PSymbol.args,
-      eval
+      eval,
+      isAction
     )
 where
 
@@ -115,24 +117,30 @@ showInfx x y = "(" ++ intercalate (" " ++ show x ++ " ") (map show y) ++ ")"
 
 -- | Read instance for program symbols
 instance Read PSymbol where
-  readsPrec p r = [ (X (read x), "") | ('p':x,"") <- lex r, all isDigit x ]
-               ++ [ (I (read x), "") | (x,"") <- lex r, all isDigit x ]
-               ++ [ (B True, "")  | ("T","") <- lex r ]
-               ++ [ (B False, "") | ("F","") <- lex r ]
-               ++ [ (S (read x), "") | (x,"") <- lex r, isLSymbol x ]
-               ++ [ (Plus, "") | ("Plus","") <- lex r ]
+  readsPrec = readPSymbol
+
+readPSymbol :: Int -> ReadS PSymbol
+readPSymbol p r =  [ (X (read x), "") | ('p':x,"") <- lex r, all isDigit x ]
+                ++ [ (I (read x), "") | (x,"") <- lex r, all isDigit x ]
+                ++ [ (B True, "")  | ("T","") <- lex r ]
+                ++ [ (B False, "") | ("F","") <- lex r ]
+                ++ [ (S (read x), "") | (x,"") <- lex r, isLSymbol x ]
+                ++ [ (Plus, "") | ("Plus","") <- lex r ]
 
 -- | Read instance for program terms
 instance Read PTerm where
-  readsPrec p r = [ (T (read x), s) | (x,s) <- lex r, isPSymbol x ]
-               ++ [ (Not :> [x],s) | ([x],s) <- readPrefx p (show Not) r ]
-               ++ [ (And :> x,s) | (x,s) <- readInfx p (show And) r ]
-               ++ [ (Or :> x,s) | (x,s) <- readInfx p (show Or) r ]
-               ++ [ (Equal :> x,s) | (x,s) <- readInfx p (show Equal) r ]
-               ++ [ (NEqual :> x,s) | (x,s) <- readInfx p (show NEqual) r ]
-               ++ [ (Header :> [x],s) | ([x],s) <- readPrefx p (show Header) r ]
-               ++ [ (Args :> [x],s) | ([x],s) <- readPrefx p (show Args) r ]
-               ++ [ (Replacing :> [x],s) | ([x],s) <- readPrefx p (show Replacing) r ]
+  readsPrec = readPTerm
+
+readPTerm :: Int -> ReadS PTerm
+readPTerm p r =  [ (T (read x), s) | (x,s) <- lex r, isPSymbol x ]
+              ++ [ (Not :> [x],s) | ([x],s) <- readPrefx p (show Not) r ]
+              ++ [ (And :> x,s) | (x,s) <- readInfx p (show And) r ]
+              ++ [ (Or :> x,s) | (x,s) <- readInfx p (show Or) r ]
+              ++ [ (Equal :> x,s) | (x,s) <- readInfx p (show Equal) r ]
+              ++ [ (NEqual :> x,s) | (x,s) <- readInfx p (show NEqual) r ]
+              ++ [ (Header :> [x],s) | ([x],s) <- readPrefx p (show Header) r ]
+              ++ [ (Args :> [x],s) | ([x],s) <- readPrefx p (show Args) r ]
+              ++ [ (Replacing :> [x],s) | ([x],s) <- readPrefx p (show Replacing) r ]
 
 -- | Read prefix expression
 readPrefx :: Int -> String -> ReadS [PTerm]
@@ -228,6 +236,7 @@ instance Eval ((Int -> Term a) -> Term a) where
   eval (X i) f = f i
 
 instance Eval Int where
+  eval (X i) = i
   eval (I i) = i
 
 instance Eval Bool where
@@ -262,3 +271,6 @@ isPSymbol "T"     = True
 isPSymbol "F"     = True
 isPSymbol ('p':s) = all isDigit s
 isPSymbol s       = all isDigit s || isLSymbol s
+
+isAction :: PTerm -> Bool
+isAction t = False
