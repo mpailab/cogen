@@ -23,31 +23,32 @@ module LSymbol
       -- exports
       LSymbol, LSymbols,
       initLSymbols,
-      name, lsymbol, addLSymbol,
-      load, save
+      readLSymbols, showLSymbols,
+      name, lsymbol, addLSymbol, isLSymbol
     )
 where
 
 -- External imports
-import           Control.Exception
 import           Data.Array
-import qualified Data.Map          as M
+import           Data.Char
+import qualified Data.Map   as M
 import           Data.Maybe
-import           System.IO
 
 -- Internal imports
-import           Database
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
 
 -- | Type of logical symbols
-type LSymbol = Int
+data LSymbol = X Int                    -- ^ variable
+             | I Int                    -- ^ integer constant
+             | S Int                    -- ^ user-defined logical symbol
+             deriving (Eq, Ord)
 
 -- | Type for informational structure of logical symbol
 data LSymbolInfo = Symbol
   {
-    id_          :: LSymbol,  -- ^ identifier
+    id_          :: Int,      -- ^ identifier
     name_        :: String,   -- ^ name
     synonyms_    :: [String], -- ^ list of synonyms
     categories_  :: [String], -- ^ list of categories
@@ -56,12 +57,18 @@ data LSymbolInfo = Symbol
   deriving (Read)
 
 -- | Type for database of logical symbols
-type LSymbols = (Array LSymbol LSymbolInfo, M.Map String LSymbol)
+type LSymbols = (Array Int LSymbolInfo, M.Map String LSymbol)
 
 ------------------------------------------------------------------------------------------
 -- Show instances
 
 -- Show instance for logical symbols
+instance Show LSymbol where
+  show (X i) = 'x' : show i
+  show (I i) = 'i' : show i
+  show (S i) = 's' : show i
+
+-- Show instance for informational structure of logical symbols
 instance Show LSymbolInfo where
   show (Symbol i n s c d) =
        "Symbol {\n"
@@ -72,15 +79,41 @@ instance Show LSymbolInfo where
     ++ "  description = " ++ show d ++ "\n}"
 
 ------------------------------------------------------------------------------------------
+-- Read instances
+
+-- | Read instance for logical symbols
+instance Read LSymbol where
+  readsPrec p r =  [ (X (read x), "") | ('x':x,"") <- lex r, all isDigit x ]
+                ++ [ (I (read x), "") | ('i':x,"") <- lex r, all isDigit x ]
+                ++ [ (S (read x), "") | ('s':x,"") <- lex r, all isDigit x ]
+
+------------------------------------------------------------------------------------------
 -- Functions
 
 -- | Init a database of logical symbols
 initLSymbols :: LSymbols
 initLSymbols = (array (1,0) [], M.empty)
 
+-- | Read a database of logical symbols from a given string
+readLSymbols :: String -> LSymbols
+readLSymbols str = (a,b)
+  where
+    a = listArray (1, length sis) sis
+    b = foldr f M.empty sis
+    sis = read str :: [LSymbolInfo]
+    f si db = let i = id_ si
+                  n = name_ si
+                  s = synonyms_ si
+                  sym = S i
+              in foldr (\x y -> M.insert x sym y) (M.insert n sym db) s
+
+-- | Show a database of logical symbols
+showLSymbols :: LSymbols -> String
+showLSymbols db = show (elems $ fst db)
+
 -- | Get the name of a logical symbol
 name :: LSymbol -> LSymbols -> String
-name s db = name_ $ fst db ! s
+name (S s) db = name_ $ fst db ! s
 
 -- | Get a logical symbol by the name or synonym
 lsymbol :: String -> LSymbols -> LSymbol
@@ -95,28 +128,13 @@ addLSymbol :: String   -- ^ name
 addLSymbol n s c d db = do
   let (f,l) = bounds $ fst db
   let i = l-1
+  let sym = S i
   let a = listArray (f,i) $ elems (fst db) ++ [Symbol i n s c d]
-  let b = foldr (\x y -> M.insert x i y) (M.insert n i $ snd db) s
+  let b = foldr (\x y -> M.insert x sym y) (M.insert n sym $ snd db) s
   (a,b)
 
--- Instances for databases of logical symbols
-instance Database LSymbols where
-
-  -- | Load the database of logical symbols from a given file
-  load file = do
-    content <- try (readFile file) :: IO (Either IOError FilePath)
-    case content of
-      Left _        -> fail ( "Can't read database of logical symbols from the file \'"
-                              ++ file ++ "\'")
-      Right content -> return (a,b)
-        where
-          a = listArray (1, length sis) sis
-          b = foldr f M.empty sis
-          sis = read content :: [LSymbolInfo]
-          f si db = let i = id_ si
-                        n = name_ si
-                        s = synonyms_ si
-                    in foldr (\x y -> M.insert x i y) (M.insert n i db) s
-
-  -- | Save a database of logical symbols to a given file
-  save db file = writeFile file $ show (elems $ fst db)
+-- | Does a string correspond to a logical symbol
+isLSymbol :: String -> Bool
+isLSymbol ('x':s) = all isDigit s
+isLSymbol ('i':s) = all isDigit s
+isLSymbol ('s':s) = all isDigit s

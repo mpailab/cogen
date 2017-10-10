@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 {-|
 Module      : Database
 Description : Class Database
@@ -17,10 +19,10 @@ module Database
 where
 
 -- | Class of functions
-class Database a where
+class Monad m => Database a m where
 
   -- | Load the database from a given file
-  load :: String -> IO a
+  load :: String -> m a
 
   -- | Save a database to a given file
-  save :: a -> String -> IO ()
+  save :: a -> String -> m ()

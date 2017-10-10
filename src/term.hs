@@ -29,15 +29,13 @@ import           Data.Char
 
 -- Internal imports
 
-data Term a = Var a
-            | Const a
+data Term a = T a
             | a :> [Term a]
             deriving (Eq, Ord)
 
 instance Foldable Term where
-  foldMap f (Var v)   = f v
-  foldMap f (Const c) = f c
-  foldMap f (s :> l)  = f s `mappend` foldMap (foldMap f) l
+  foldMap f (T x)     = f x
+  foldMap f (x :> ts) = f x `mappend` foldMap (foldMap f) ts
 
 -- instance Show Term where
 --   show (Var (P x))   = "$p" ++ show x
@@ -119,10 +117,10 @@ class ITerm t a where
 instance ITerm Term a where
 
   -- Get header of term
-  header (sym :> _) = sym
+  header (x :> _) = x
 
   -- Get operands list of term
-  args (_ :> l) = l
+  args (_ :> ts) = ts
 
   -- Get subterms list of term
   subterms t =  t : concatMap subterms (args t)

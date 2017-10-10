@@ -1,4 +1,7 @@
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE Rank2Types            #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
 
 {-|
 Module      : Global
@@ -18,30 +21,29 @@ module Global
 where
 
 -- External imports
+import           Control.Exception
 import           Control.Monad.State
+import           System.IO
 
 -- Internal imports
--- import           Program
+import           Program
 -- import           Routine
-import LSymbol
+import           Database
+import           LSymbol
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
 
 -- | Type of monad Globe
-type Global a = IO (State Info a)
+type Global = State Info
 
 -- | Type of global informational structure
-newtype Info = Info
+data Info = Info
   {
-    lsymbols :: LSymbols -- ^ database of logical symbols
+    lsymbols :: LSymbols, -- ^ database of logical symbols
+    programs :: Programs  -- ^ database of programs
+    -- routines :: Routines
   }
--- data Info = Info
---   {
---     lsymbols :: LSymbols, -- ^ database of logical symbols
---     programs :: Programs,
---     routines :: Routines
---   }
 
 ------------------------------------------------------------------------------------------
 -- Functions
@@ -50,13 +52,18 @@ make :: forall a. (Global a -> a)
 make = (`evalState` Info initLSymbols)
 
 -- Instances for databases of logical symbols
-instance Database (Global LSymbols) where
+instance Database LSymbols Global where
 
   -- | Load the database of logical symbols from a given file
-  load file =
+  load file = do
+    content <- liftIO try (readFile file)
+    case content of
+      Left _        -> fail ( "Can't read database of logical symbols from the file \'"
+                              ++ file ++ "\'")
+      Right content -> return $ readLSymbols content
 
   -- | Save a database of logical symbols to a given file
-  save db file = writeFile file $ show (elems $ fst db)
+  save db file = liftIO writeFile file $ showLSymbols db
 
 
   -- do

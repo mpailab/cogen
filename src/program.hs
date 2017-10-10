@@ -12,7 +12,7 @@ A program is a collection of instructions that organizes as a tree in which ever
 module Program
     (
       -- exports
-      Program.Symbol,
+      Program.PSymbol,
       Program(..),
       openProgramDB, closeProgramDB, getProgram, putProgram, loadProgram, saveProgram
     )
@@ -27,8 +27,11 @@ import           System.FilePath
 import           System.IO
 
 -- Internal imports
-import           Program.Symbol
-import qualified Symbol            as L
+import           LSymbol
+import           Program.PSymbol
+
+------------------------------------------------------------------------------------------
+-- Data and type declaration
 
 -- | Type of program in compiler
 data Program
@@ -75,6 +78,16 @@ data Program
 
   deriving(Eq, Read)
 
+-- | Type of programs database
+type Programs = M.Map Int Program
+
+-- Default indent in string representation of programs
+indent :: String
+indent = "  "
+
+------------------------------------------------------------------------------------------
+-- Show instances
+
 -- Show instance for Program
 instance Show Program where
   show prog = show_ prog ""
@@ -85,7 +98,7 @@ show_ (Assign vl v g c p) ind =
   ind ++ show (var v) ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ show_ p ind
 
 show_  (Branch vl c b p) ind =
-  ind ++ show c ++ "\n" ++ show_ b (ind ++ "  ") ++ show_ p ind
+  ind ++ show c ++ "\n" ++ show_ b (ind ++ indent) ++ show_ p ind
 
 show_ (Switch vl e cl p) ind =
   foldl f (ind ++ "case " ++ show e ++ " of\n") $ zip cl [1 .. length cl]
@@ -97,8 +110,82 @@ show_ (Action vl t) ind = ind ++ show t
 
 show_ Empty ind = ""
 
--- | Type of programs database
-type Programs = M.Map Int Program
+------------------------------------------------------------------------------------------
+-- Read instances
+
+-- Read instance for Program
+instance Read Program where
+  readsPrec p r = read_ r indent
+
+read_ :: Int -> String -> ReadS [Program]
+read_ p ind r = [ (x,t) | (str,s) <- lex r,
+                              (x,t) <- readParen True (readsPrec p) s ]
+
+-- An example of how to parse an indented tree of data in Haskell using Parsec and indents.
+--
+-- > import Control.Applicative
+-- > import Data.Char (isSpace)
+-- > import Data.Either.Utils (forceEither)
+-- > import Data.Monoid
+-- > import System.Environment (getArgs)
+-- > import Text.Parsec hiding (many, optional, (<|>))
+-- > import Text.Parsec.Indent
+-- A basic tree structure:
+--
+-- > data Tree = Node [Tree] | Leaf String
+-- A simple serialization function to easily check the result of our parsing:
+--
+-- > serializeIndentedTree tree = drop 2 $ s (-1) tree
+-- >   where
+-- >     s i (Node children) = "\n" <> (concat $ replicate i "    ") <> (concat $ map (s (i+1)) children)
+-- >     s _ (Leaf text)     = text <> " "
+-- Our main function and some glue:
+--
+-- > main = do
+-- >     args <- getArgs
+-- >     input <- if null args then return example else readFile $ head args
+-- >     putStrLn $ serializeIndentedTree $ forceEither $ parseIndentedTree input
+-- >
+-- > parseIndentedTree input = runIndent "" $ runParserT aTree () "" input
+-- The actual parser:
+--
+-- Note that the indents package works by storing a SourcePos in a State monad. Its combinators don't actually consume indentation, they just compare the column numbers. So where we consume spaces is very important.
+--
+-- > aTree = Node <$> many aNode
+-- >
+-- > aNode = spaces *> withBlock makeNode aNodeHeader aNode
+-- >
+-- > aNodeHeader = many1 aLeaf <* spaces
+-- >
+-- > aLeaf = Leaf <$> (many1 (satisfy (not . isSpace)) <* many (oneOf " \t"))
+-- >
+-- > makeNode leaves nodes = Node $ leaves <> nodes
+-- An example tree:
+--
+-- > example = unlines [
+-- >     "lorem ipsum",
+-- >     "    dolor",
+-- >     "    sit amet",
+-- >     "    consectetur",
+-- >     "        adipiscing elit dapibus",
+-- >     "    sodales",
+-- >     "urna",
+-- >     "    facilisis"
+-- >   ]
+-- The result:
+--
+-- % runhaskell parseIndentedTree.lhs
+-- lorem ipsum
+--     dolor
+--     sit amet
+--     consectetur
+--         adipiscing elit dapibus
+--     sodales
+-- urna
+--     facilisis
+
+------------------------------------------------------------------------------------------
+-- Functions
 
 -- | Initialize a database from one saved in given directory
 openProgramDB :: String -> IO Programs
