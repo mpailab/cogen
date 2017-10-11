@@ -119,6 +119,7 @@ showInfx x y = "(" ++ intercalate (" " ++ show x ++ " ") (map show y) ++ ")"
 instance Read PSymbol where
   readsPrec = readPSymbol
 
+-- | Read a program symbol
 readPSymbol :: Int -> ReadS PSymbol
 readPSymbol p r =  [ (X (read x), "") | ('p':x,"") <- lex r, all isDigit x ]
                 ++ [ (I (read x), "") | (x,"") <- lex r, all isDigit x ]
@@ -131,6 +132,7 @@ readPSymbol p r =  [ (X (read x), "") | ('p':x,"") <- lex r, all isDigit x ]
 instance Read PTerm where
   readsPrec = readPTerm
 
+-- | Read a program term
 readPTerm :: Int -> ReadS PTerm
 readPTerm p r =  [ (T (read x), s) | (x,s) <- lex r, isPSymbol x ]
               ++ [ (Not :> [x],s) | ([x],s) <- readPrefx p (show Not) r ]
@@ -272,5 +274,7 @@ isPSymbol "F"     = True
 isPSymbol ('p':s) = all isDigit s
 isPSymbol s       = all isDigit s || isLSymbol s
 
+-- | Does a program term correspond to an action
 isAction :: PTerm -> Bool
-isAction t = False
+isAction (Replacing :> _) = True
+isAction t                = False

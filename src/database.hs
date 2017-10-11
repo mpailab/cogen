@@ -19,10 +19,10 @@ module Database
 where
 
 -- | Class of functions
-class Monad m => Database a m where
+class Monad m => Database a b m where
 
   -- | Load the database from a given file
-  load :: String -> m a
+  load :: a -> m b
 
   -- | Save a database to a given file
-  save :: a -> String -> m ()
+  save :: b -> a -> m ()

@@ -12,8 +12,8 @@ A program is a collection of instructions that organizes as a tree in which ever
 module Program
     (
       -- exports
-      PSymbol,
-      Program(..)
+      Program(..), Programs,
+      initPrograms
     )
 where
 
@@ -84,35 +84,42 @@ type Programs = M.Map Int Program
 ------------------------------------------------------------------------------------------
 -- Show instances
 
--- Show instance for Program
+-- | Show instance for Program
 instance Show Program where
-  show prog = show_ prog ""
+  show = showProgram ""
 
-show_ :: Program -> String -> String
+-- | Show a program fragment corresponding to a given indent
+showProgram :: String -> Program -> String
 
-show_ (Assign vl v g c p) ind = let x = var v :: PSymbol
-  in ind ++ show v ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ show_ p ind
+-- | Show an assigning instruction of program fragment corresponding to a given indent
+showProgram ind (Assign vl v g c p) = let x = var v :: PSymbol
+  in ind ++ show x ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ showProgram ind p
 
-show_  (Branch vl c b p) ind =
-  ind ++ show c ++ "\n" ++ show_ b (' ':' ':ind) ++ show_ p ind
+-- | Show a branching instruction of program fragment corresponding to a given indent
+showProgram ind (Branch vl c b p) =
+  ind ++ show c ++ "\n" ++ showProgram (' ':' ':ind) b ++ showProgram ind p
 
-show_ (Switch vl e cl p) ind =
+-- | Show a switching instruction of program fragment corresponding to a given indent
+showProgram ind (Switch vl e cl p) =
   foldl f (ind ++ "case " ++ show e ++ " of\n") $ zip cl [1 .. length cl]
   where
     f :: String -> (Program, Int) -> String
-    f x (y,i) = x ++ (' ':ind) ++ show i ++ ":\n" ++ show_ y (' ':' ':ind)
+    f x (y,i) = x ++ (' ':ind) ++ show i ++ ":\n" ++ showProgram (' ':' ':ind) y
 
-show_ (Action vl t) ind = ind ++ show t
+-- | Show an acting instruction of program fragment corresponding to a given indent
+showProgram ind (Action vl t) = ind ++ show t
 
-show_ Empty ind = ""
+-- | Show an empty program fragment corresponding to a given indent
+showProgram ind Empty = ""
 
 ------------------------------------------------------------------------------------------
 -- Read instances
 
--- Read instance for Program
+-- | Read instance for Program
 instance Read Program where
   readsPrec p = readProgram p 0
 
+-- | Read a program fragment corresponding to a given indent
 readProgram :: Int -> Int -> ReadS Program
 readProgram p ind r =  readAssign p ind r
                     ++ readBranch p ind r
@@ -120,6 +127,7 @@ readProgram p ind r =  readAssign p ind r
                     ++ readAction p ind r
                     ++ readEmpty  p ind r
 
+-- | Read an assigning instruction of program fragment corresponding to a given indent
 readAssign :: Int -> Int -> ReadS Program
 readAssign i ind r =
   [ (Assign [] (eval x) g c p, w) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
@@ -128,6 +136,7 @@ readAssign i ind r =
                                     (c, '\n':v) <- readPTerm i u,
                                     (p, w) <- readProgram i ind v ]
 
+-- | Read a branching instruction of program fragment corresponding to a given indent
 readBranch :: Int -> Int -> ReadS Program
 readBranch i ind r =
   [ (Branch [] c b p, v) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
@@ -135,6 +144,7 @@ readBranch i ind r =
                            (b, u) <- readProgram i (ind+2) t,
                            (p, v) <- readProgram i ind u ]
 
+-- | Read a case of switching instruction corresponding to a given indent
 readSwitchCases :: Int -> Int -> ReadS [Program]
 readSwitchCases i ind r =  [ (p:cl, v) | (' ':s@(a:_)) <- [skipSpaces r ind], isDigit a,
                                          (x, ':':'\n':t) <- lex s, all isDigit x,
@@ -142,6 +152,7 @@ readSwitchCases i ind r =  [ (p:cl, v) | (' ':s@(a:_)) <- [skipSpaces r ind], is
                                          (cl, v) <- readSwitchCases i ind u ]
                         ++ [ ([], r) | (a:s) <- [skipSpaces r ind],  a /= ' ' ]
 
+-- | Read a switching instruction of program fragment corresponding to a given indent
 readSwitch :: Int -> Int -> ReadS Program
 readSwitch i ind r =
   [ (Switch [] e cl p, v) | ('c':'a':'s':'e':' ':s) <- [skipSpaces r ind],
@@ -149,99 +160,51 @@ readSwitch i ind r =
                             (cl, u) <- readSwitchCases i ind t,
                             (p, v) <- readProgram i ind u  ]
 
+-- | Read an acting instruction of program fragment corresponding to a given indent
 readAction :: Int -> Int -> ReadS Program
 readAction i ind r =
   [ (Action [] t, u) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
                        (t, '\n':u) <- readPTerm i s, isAction t ]
 
+-- | Read an empty program fragment corresponding to a given indent
 readEmpty :: Int -> Int -> ReadS Program
 readEmpty i ind "" = [(Empty, "")]
 
+-- | Skip in a string a given number of spaces
 skipSpaces :: String -> Int -> String
 skipSpaces str 0       = str
 skipSpaces (' ':str) n = skipSpaces str (n-1)
 
--- import Text.Parsec hiding (State)
--- import Text.Parsec.Indent
--- import Control.Monad.State
---
--- type ProgramParser = ParsecT String () (State SourcePos) Program
---
--- parse :: ProgramParser -> String -> Either ParseError Program
--- parse p str = runIndent "" $ runParserT p () "" str
---
--- aProgram :: ProgramParser
--- aProgram = do
---   b <- withBlock NamedList aName anItem
---   spaces
---   return b
+------------------------------------------------------------------------------------------
+-- Database instances
 
--- An example of how to parse an indented tree of data in Haskell using Parsec and indents.
---
--- > import Control.Applicative
--- > import Data.Char (isSpace)
--- > import Data.Either.Utils (forceEither)
--- > import Data.Monoid
--- > import System.Environment (getArgs)
--- > import Text.Parsec hiding (many, optional, (<|>))
--- > import Text.Parsec.Indent
--- A basic tree structure:
---
--- > data Tree = Node [Tree] | Leaf String
--- A simple serialization function to easily check the result of our parsing:
---
--- > serializeIndentedTree tree = drop 2 $ s (-1) tree
--- >   where
--- >     s i (Node children) = "\n" <> (concat $ replicate i "    ") <> (concat $ map (s (i+1)) children)
--- >     s _ (Leaf text)     = text <> " "
--- Our main function and some glue:
---
--- > main = do
--- >     args <- getArgs
--- >     input <- if null args then return example else readFile $ head args
--- >     putStrLn $ serializeIndentedTree $ forceEither $ parseIndentedTree input
--- >
--- > parseIndentedTree input = runIndent "" $ runParserT aTree () "" input
--- The actual parser:
---
--- Note that the indents package works by storing a SourcePos in a State monad. Its combinators don't actually consume indentation, they just compare the column numbers. So where we consume spaces is very important.
---
--- > aTree = Node <$> many aNode
--- >
--- > aNode = spaces *> withBlock makeNode aNodeHeader aNode
--- >
--- > aNodeHeader = many1 aLeaf <* spaces
--- >
--- > aLeaf = Leaf <$> (many1 (satisfy (not . isSpace)) <* many (oneOf " \t"))
--- >
--- > makeNode leaves nodes = Node $ leaves <> nodes
--- An example tree:
---
--- > example = unlines [
--- >     "lorem ipsum",
--- >     "    dolor",
--- >     "    sit amet",
--- >     "    consectetur",
--- >     "        adipiscing elit dapibus",
--- >     "    sodales",
--- >     "urna",
--- >     "    facilisis"
--- >   ]
--- The result:
---
--- % runhaskell parseIndentedTree.lhs
--- lorem ipsum
---     dolor
---     sit amet
---     consectetur
---         adipiscing elit dapibus
---     sodales
--- urna
---     facilisis
+-- | Database instance for programs
+instance Database String Programs IO where
+
+  -- | Load the database of programs from a given directory
+  load file = do
+    dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
+    case dir_content of
+       Left _            -> return M.empty
+       Right dir_content -> foldM f M.empty dir_content
+       where
+         f :: Programs -> FilePath -> IO Programs
+         f db file = do
+           content <- try (readFile file) :: IO (Either IOError FilePath)
+           case content of
+              Left _        -> return db
+              Right content -> return (putProgram (read $ takeBaseName file) (read content) db)
+
+  -- | Save a database of logical symbols to a given file
+  save db file = writeFile file $ showLSymbols db
 
 ------------------------------------------------------------------------------------------
 -- Functions
---
+
+-- | Init a database of programs
+initPrograms :: Programs
+initPrograms = M.empty
+
 -- -- | Initialize a database from one saved in given directory
 -- openProgramDB :: String -> IO Programs
 -- openProgramDB dir = do

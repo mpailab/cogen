@@ -1,7 +1,5 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE Rank2Types            #-}
-{-# LANGUAGE TypeSynonymInstances  #-}
 
 {-|
 Module      : Global
@@ -21,9 +19,7 @@ module Global
 where
 
 -- External imports
-import           Control.Exception
 import           Control.Monad.State
-import           System.IO
 
 -- Internal imports
 import           Program
@@ -35,7 +31,7 @@ import           LSymbol
 -- Data and type declaration
 
 -- | Type of monad Globe
-type Global = State Info
+type Global = StateT Info IO
 
 -- | Type of global informational structure
 data Info = Info
@@ -48,22 +44,13 @@ data Info = Info
 ------------------------------------------------------------------------------------------
 -- Functions
 
-make :: forall a. (Global a -> a)
-make = (`evalState` Info initLSymbols)
+make :: Global a -> IO a
+make = (`evalStateT` Info initLSymbols initPrograms)
 
--- Instances for databases of logical symbols
-instance Database LSymbols Global where
-
-  -- | Load the database of logical symbols from a given file
-  load file = do
-    content <- liftIO try (readFile file)
-    case content of
-      Left _        -> fail ( "Can't read database of logical symbols from the file \'"
-                              ++ file ++ "\'")
-      Right content -> return $ readLSymbols content
-
-  -- | Save a database of logical symbols to a given file
-  save db file = liftIO writeFile file $ showLSymbols db
+-- Instances for databases of logical symbols in Global monad
+instance Database String LSymbols Global where
+  load = liftIO . (load :: String -> IO LSymbols)
+  save db = liftIO . (save db :: String -> IO ())
 
 
   -- do
