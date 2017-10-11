@@ -44,13 +44,32 @@ data Info = Info
 ------------------------------------------------------------------------------------------
 -- Functions
 
+-- | Get the database of logical symbols
+getLSymbols :: Global LSymbols
+getLSymbols = fmap lsymbols get
+
+-- | Get the database of programs
+getPrograms :: Global Programs
+getPrograms = fmap programs get
+
+-- | Make somesing in monad Global
 make :: Global a -> IO a
 make = (`evalStateT` Info initLSymbols initPrograms)
 
--- Instances for databases of logical symbols in Global monad
+-- Instances of Database for reading/writing logical symbols in monad Global
 instance Database String LSymbols Global where
   load = liftIO . (load :: String -> IO LSymbols)
   save db = liftIO . (save db :: String -> IO ())
+
+-- Instances of Database for reading/writing programs in monad Global
+instance Database String Programs Global where
+  load dir = getLSymbols >>= \x -> liftIO (load (dir, x) :: IO Programs)
+  save db dir = getLSymbols >>= \x -> liftIO (save db (dir, x) :: IO ())
+
+-- Instances of Database for reading/writing a program of logical symbol in monad Global
+instance Database (String, LSymbol) Program Global where
+  load (dir, s) = getLSymbols >>= \x -> liftIO (load (dir, s, x) :: IO Programs)
+  save db (dir, s) = getLSymbols >>= \x -> liftIO (save db (dir, s, x) :: IO ())
 
 
   -- do

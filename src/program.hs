@@ -1,3 +1,6 @@
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 {-|
 Module      : Program
 Description : Representation of programs
@@ -22,11 +25,13 @@ import           Control.Exception
 import           Control.Monad
 import           Data.Char
 import qualified Data.Map          as M
+import           Data.Maybe
 import           System.Directory
 import           System.FilePath
 import           System.IO
 
 -- Internal imports
+import           Database
 import           LSymbol
 import           Program.PSymbol
 
@@ -79,7 +84,7 @@ data Program
   deriving(Eq)
 
 -- | Type of programs database
-type Programs = M.Map Int Program
+type Programs = M.Map LSymbol Program
 
 ------------------------------------------------------------------------------------------
 -- Show instances
@@ -179,10 +184,10 @@ skipSpaces (' ':str) n = skipSpaces str (n-1)
 -- Database instances
 
 -- | Database instance for programs
-instance Database String Programs IO where
+instance Database (String, LSymbols) Programs IO where
 
   -- | Load the database of programs from a given directory
-  load file = do
+  load (dir, lsym_db) = do
     dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
     case dir_content of
        Left _            -> return M.empty
@@ -193,10 +198,33 @@ instance Database String Programs IO where
            content <- try (readFile file) :: IO (Either IOError FilePath)
            case content of
               Left _        -> return db
-              Right content -> return (putProgram (read $ takeBaseName file) (read content) db)
+              Right content -> return (addProgram s (read content) db)
+              where
+                  s = lsymbol (read $ takeBaseName file) lsym_db
 
-  -- | Save a database of logical symbols to a given file
-  save db file = writeFile file $ showLSymbols db
+  -- | Save a database of programs to a given directory
+  save db (dir, lsym_db) = do
+    createDirectoryIfMissing True dir
+    mapM_ f (M.assocs db)
+    where
+      f :: (LSymbol, Program) -> IO ()
+      f (s, p) = writeFile (dir ++ name s lsym_db ++ ".db") (show p)
+
+-- | Database instance for program
+instance Database (String, LSymbol, LSymbols) Program IO where
+
+  -- | Load a program of logical symbol from a database saved in given directory
+  load (dir, s, lsym_db) = do
+    let file = dir ++ "/" ++ name s lsym_db ++ ".db"
+    content <- try (readFile file) :: IO (Either IOError FilePath)
+    case content of
+      Left _        -> return Empty
+      Right content -> return (read content)
+
+  -- | Save a program of logical symbol to a database saved in given directory
+  save p (dir, s, lsym_db) = do
+    createDirectoryIfMissing True dir
+    writeFile (dir ++ "/" ++ name s lsym_db ++ ".db") (show p)
 
 ------------------------------------------------------------------------------------------
 -- Functions
@@ -205,50 +233,10 @@ instance Database String Programs IO where
 initPrograms :: Programs
 initPrograms = M.empty
 
--- -- | Initialize a database from one saved in given directory
--- openProgramDB :: String -> IO Programs
--- openProgramDB dir = do
---   dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
---   case dir_content of
---      Left _            -> return M.empty
---      Right dir_content -> foldM f M.empty dir_content
---      where
---        f :: Programs -> FilePath -> IO Programs
---        f db file = do
---          content <- try (readFile file) :: IO (Either IOError FilePath)
---          case content of
---             Left _        -> return db
---             Right content -> return (putProgram (read $ takeBaseName file) (read content) db)
---
--- -- | Close a database and save it in given directory
--- closeProgramDB :: Programs -> String -> IO ()
--- closeProgramDB db dir = do
---   createDirectoryIfMissing True dir
---   mapM_ f (M.assocs db)
---   where
---     f :: (L.Symbol, Program) -> IO ()
---     f (sym, prog) = writeFile (dir ++ show sym ++ ".db") (show prog)
---
--- -- | Get a program of logical symbol from a database
--- getProgram :: L.Symbol -> Programs -> Maybe Program
--- getProgram sym db = case M.lookup sym db of
---   Just prog -> return prog
---   Nothing   -> return Empty
---
--- -- | Load a program of logical symbol from a database saved in given directory
--- loadProgram :: L.Symbol -> String -> IO Program
--- loadProgram sym dir = do
---   content <- try (readFile (dir ++ show sym ++ ".db")) :: IO (Either IOError FilePath)
---   case content of
---     Left _        -> return Empty
---     Right content -> return (read content)
---
--- -- | Put a program of logical symbol to a database
--- putProgram :: L.Symbol -> Program -> Programs -> Programs
--- putProgram = M.insert
---
--- -- | Save a program of logical symbol to a database saved in given directory
--- saveProgram :: L.Symbol -> Program -> String -> IO ()
--- saveProgram sym prog dir = do
---   createDirectoryIfMissing True dir
---   writeFile (dir ++ "/" ++ show sym ++ ".db") (show prog)
+-- | Get the program of logical symbol
+program :: LSymbol -> Programs -> Program
+program s db = fromJust $ M.lookup s db
+
+-- | Add a program of logical symbol to a database
+addProgram :: LSymbol -> Program -> Programs -> Programs
+addProgram = M.insert

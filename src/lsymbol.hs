@@ -125,7 +125,7 @@ initLSymbols = (array (1,0) [], M.empty)
 
 -- | Get the name of a logical symbol
 name :: LSymbol -> LSymbols -> String
-name (S s) db = name_ $ fst db ! s
+name (S n) db = name_ $ fst db ! n
 
 -- | Get a logical symbol by the name or synonym
 lsymbol :: String -> LSymbols -> LSymbol
