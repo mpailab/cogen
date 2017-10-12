@@ -1,0 +1,3 @@
+header(p1) == "premises"
+  isCompiler
+    Premises = args(p1)

@@ -1,0 +1,4 @@
+header(p1) == "forall"
+  isCompiler
+    p2 <- args(p1)
+    treat header(p2) p2

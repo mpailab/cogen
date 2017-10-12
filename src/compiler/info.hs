@@ -33,6 +33,7 @@ import           Rule
 import           Term
 
 type Compiler a = State Info a
+-- type Compiler = StateT Info Global
 
 -- | Type of table of information units
 type Units = Map.Map LSymbol Unit

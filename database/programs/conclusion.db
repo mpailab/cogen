@@ -1,0 +1,9 @@
+header(p1) == "conclusion"
+  isCompiler
+    p2 <- Args(p1) | header(p2) == "equality" || header(p2) == "equivalence"
+    p3, p4 <- Args(p2)
+    LeftToRight
+      From = p3
+      To = p4
+    From = p4
+    To = p3

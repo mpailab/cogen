@@ -1,0 +1,3 @@
+header(p1) == "right-to-left"
+  isCompiler
+    LeftToRight = F
