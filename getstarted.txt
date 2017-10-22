@@ -24,6 +24,8 @@ ide-haskell-cabal
 ide-haskell
 autocomplete-haskell
 
+7. Скачиваем с https://github.com/mpailab/language-corel.git и копируем в atom_default_dir/.atom/packages подсветку синтаксиса для языка coral.
+
 На этом базовая установка закончена. Панель Haskell IDE в Atom появится после
 открытия файла с расширением hs.
 
