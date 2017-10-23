@@ -187,6 +187,7 @@ not t              = Not :> [t]
 
 -- | Take the logical and of a given program terms
 and :: [PTerm] -> PTerm
+and [] = T (B True)
 and [t] = t
 and (t:s) = And :> case (t, Program.PSymbol.and s) of
   (T (B True), y)        -> [y]

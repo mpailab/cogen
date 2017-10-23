@@ -21,8 +21,11 @@ do
       (From,To) = LeftToRight ? (l,r) : (r,l)
       done
     done
-  else
-
+  for neg [i] in args t
+    where
+      t \= 2 and i <= 1
+  do
+    done
   done
 
 plus t

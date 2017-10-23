@@ -41,13 +41,21 @@ import           Program.PSymbol
 -- | Type of program in compiler
 data Program
 
-  -- | Assigning instruction iterates terms with respect to a given condition
-  --   and assigns them to a given program variable
+  -- | Assigns a value to a given pattern with respect to a given condition
   = Assign
     {
-      variables :: [Int],  -- ^ list of numbers of depended program variables
-      variable  :: Int,    -- ^ number of a program variable
-      generate  :: PTerm,  -- ^ generator of terms
+      pattern   :: PTerm,  -- ^ assigned pattern
+      value     :: PTerm,  -- ^ assigning value
+      condition :: PTerm,  -- ^ condition for assignment
+      jump      :: Program -- ^ jump to next program fragment
+    }
+
+  -- | Iterates terms with respect to a given condition
+  --   and assigns them to a given pattern
+  | Iteration
+    {
+      pattern   :: PTerm,  -- ^ assigned pattern
+      iterate   :: PTerm,  -- ^ generator of list of terms
       condition :: PTerm,  -- ^ condition for iterating of terms
       jump      :: Program -- ^ jump to next program fragment
     }
@@ -56,26 +64,26 @@ data Program
   --   with respect to a given condition
   | Branch
     {
-      variables :: [Int],   -- ^ list of numbers of depended program variables
       condition :: PTerm,   -- ^ condition for the branch
       branch    :: Program, -- ^ branch to program fragment
       jump      :: Program  -- ^ jump to next program fragment
     }
 
-  -- | Switching instruction jumps to a program fragment defined by an evaluated number
+  -- | Switching instruction jumps to a program fragment defined by a given expression
   | Switch
     {
-      variables :: [Int],     -- ^ list of numbers of depended program variables
-      evaluate  :: PTerm,     -- ^ evaluation of number of program unit
-      cases     :: [Program], -- ^ list of program units
-      jump      :: Program    -- ^ jump to next program fragment
+      expression :: PTerm,              -- ^ expression
+      cases      :: [(PTerm, Program)], -- ^ list of pairs (pattern, program fragment)
+      condition  :: PTerm,              -- ^ additional condition
+      jump       :: Program             -- ^ jump to next program fragment
     }
 
-  -- | Acting instruction performs a given action and terminates the program
+  -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
-      variables :: [Int], -- ^ list of numbers of depended program variables
-      perform   :: PTerm  -- ^ performing of an action
+      perform   :: PTerm,  -- ^ performing of an action
+      condition :: PTerm,  -- ^ condition for an action
+      jump      :: Program -- ^ jump to next program fragment
     }
 
   -- | Empty represents an auxiliary program instruction
