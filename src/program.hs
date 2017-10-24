@@ -41,21 +41,12 @@ import           Program.PSymbol
 -- | Type of program in compiler
 data Program
 
-  -- | Assigns a value to a given pattern with respect to a given condition
+  -- | Assigning instruction iterates terms with respect to a given condition
+  --   and assigns them to a given program variable
   = Assign
     {
       pattern   :: PTerm,  -- ^ assigned pattern
-      value     :: PTerm,  -- ^ assigning value
-      condition :: PTerm,  -- ^ condition for assignment
-      jump      :: Program -- ^ jump to next program fragment
-    }
-
-  -- | Iterates terms with respect to a given condition
-  --   and assigns them to a given pattern
-  | Iteration
-    {
-      pattern   :: PTerm,  -- ^ assigned pattern
-      iterate   :: PTerm,  -- ^ generator of list of terms
+      generate  :: PTerm,  -- ^ generator of list of terms
       condition :: PTerm,  -- ^ condition for iterating of terms
       jump      :: Program -- ^ jump to next program fragment
     }
@@ -74,15 +65,14 @@ data Program
     {
       expression :: PTerm,              -- ^ expression
       cases      :: [(PTerm, Program)], -- ^ list of pairs (pattern, program fragment)
-      condition  :: PTerm,              -- ^ additional condition
       jump       :: Program             -- ^ jump to next program fragment
     }
 
   -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
-      perform   :: PTerm,  -- ^ performing of an action
-      condition :: PTerm,  -- ^ condition for an action
+      action    :: PTerm,  -- ^ action
+      condition :: PTerm,  -- ^ condition of action
       jump      :: Program -- ^ jump to next program fragment
     }
 
