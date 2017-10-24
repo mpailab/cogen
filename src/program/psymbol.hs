@@ -60,105 +60,102 @@ data PSymbol = X Int                    -- ^ program variable
              | Or                       -- ^ logical or
              | Equal                    -- ^ equality of objects
              | NEqual                   -- ^ negation of equality of objects
-             | Header                   -- ^ function symbol of term
              | Args                     -- ^ arguments of term
-             | Plus                     -- ! symbol +
-             | Replacing                -- !
+             | Replace                  -- !
              deriving (Eq, Ord)
 
 -- | Type of program terms
 type PTerm = Term PSymbol
 
 ------------------------------------------------------------------------------------------
--- Show instances
+-- Parser instances
 
--- | Show instance for program symbols
-instance Show PSymbol where
-  show (X i)     = 'p' : show i
-  show (I i)     = show i
-  show (B True)  = "T"
-  show (B False) = "F"
-  show (S s)     = show s
-  show Not       = "!"
-  show And       = "&&"
-  show Or        = "||"
-  show Equal     = "=="
-  show NEqual    = "!="
-  show Header    = "header"
-  show Args      = "args"
-  show Plus      = "Plus"
-  show Replacing = "Replacing"
+-- | Parser instance for program symbols
+instance Parser PSymbol where
+  parse_ = parsePSymbol
+  write  = writePSymbol
 
--- | Show instance for program terms
-instance Show PTerm where
-  show (T x)            = show x
-  show (Not :> x)       = showPrefx Not x
-  show (And :> x)       = showInfx And x
-  show (Or :> x)        = showInfx Or x
-  show (Equal :> x)     = showInfx Equal x
-  show (NEqual :> x)    = showInfx NEqual x
-  show (Header :> x)    = showPrefx Header x
-  show (Args :> x)      = showPrefx Args x
-  show (Replacing :> x) = showPrefx Replacing x
+-- | Parse a program symbol
+parsePSymbol :: ParserS PSymbol
+parsePSymbol str db
+  =  [ (X (read x), "") | ('p':x,"") <- lex str, all isDigit x ]
+  ++ [ (I (read x), "") | (x,"") <- lex str, all isDigit x ]
+  ++ [ (B True, "") | ("True","") <- lex str ]
+  ++ [ (B False, "") | ("False","") <- lex str ]
+  ++ [ (S (lsymbol x db), "") | (x,"") <- lex str, isLSymbol x db ]
 
--- | Show prefix expression
-showPrefx :: PSymbol -> [PTerm] -> String
-showPrefx x [t] = case show t of
-  y@('(':_) -> show x ++ y
-  y         -> show x ++ "(" ++ y ++ ")"
-showPrefx x ts = show x ++ "(" ++ intercalate ", " (map show ts) ++ ")"
+-- | Write a program symbol
+writePSymbol :: PSymbol -> LSymbols -> String
+writePSymbol (X i) _       = 'p' : show i
+writePSymbol (I i) _       = show i
+writePSymbol (B True) _    = "True"
+writePSymbol (B False) _   = "False"
+writePSymbol (S s) db      = name s db
+writePSymbol (Not) _       = "no"
+writePSymbol (And) _       = "and"
+writePSymbol (Or) _        = "or"
+writePSymbol (Equal) _     = "eq"
+writePSymbol (NEqual) _    = "ne"
+writePSymbol (Args) _      = "args"
+writePSymbol (Replace) _   = "replace"
 
--- | Show infix expression
-showInfx :: PSymbol -> [PTerm] -> String
-showInfx x y = "(" ++ intercalate (" " ++ show x ++ " ") (map show y) ++ ")"
+-- | Parser instance for program terms
+instance Parser PTerm where
+  parse_ = parsePTerm
+  write  = writePTerm
 
-------------------------------------------------------------------------------------------
--- Read instances
-
--- | Read instance for program symbols
-instance Read PSymbol where
-  readsPrec = readPSymbol
-
--- | Read a program symbol
-readPSymbol :: Int -> ReadS PSymbol
-readPSymbol p r =  [ (X (read x), "") | ('p':x,"") <- lex r, all isDigit x ]
-                ++ [ (I (read x), "") | (x,"") <- lex r, all isDigit x ]
-                ++ [ (B True, "")  | ("T","") <- lex r ]
-                ++ [ (B False, "") | ("F","") <- lex r ]
-                ++ [ (S (read x), "") | (x,"") <- lex r, isLSymbol x ]
-                ++ [ (Plus, "") | ("Plus","") <- lex r ]
-
--- | Read instance for program terms
-instance Read PTerm where
-  readsPrec = readPTerm
-
--- | Read a program term
-readPTerm :: Int -> ReadS PTerm
-readPTerm p r =  [ (T (read x), s) | (x,s) <- lex r, isPSymbol x ]
-              ++ [ (Not :> [x],s) | ([x],s) <- readPrefx p (show Not) r ]
-              ++ [ (And :> x,s) | (x,s) <- readInfx p (show And) r ]
-              ++ [ (Or :> x,s) | (x,s) <- readInfx p (show Or) r ]
-              ++ [ (Equal :> x,s) | (x,s) <- readInfx p (show Equal) r ]
-              ++ [ (NEqual :> x,s) | (x,s) <- readInfx p (show NEqual) r ]
-              ++ [ (Header :> [x],s) | ([x],s) <- readPrefx p (show Header) r ]
-              ++ [ (Args :> [x],s) | ([x],s) <- readPrefx p (show Args) r ]
-              ++ [ (Replacing :> [x],s) | ([x],s) <- readPrefx p (show Replacing) r ]
+-- | Parse a program term
+parsePTerm :: ParserS PTerm
+parsePTerm s0 db
+  =  [ (T (parse x), s1) | (x,s1) <- lex s0, isPSymbol x db ]
+  ++ [ (Not :> [x], s1) | ([x],s1) <- parsePrefx (write Not) s0 db ]
+  ++ [ (And :> x, s1) | (x,s1) <- parseInfx (write And) s0 db ]
+  ++ [ (Or :> x, s1) | (x,s1) <- parseInfx (write Or) s0 db ]
+  ++ [ (Equal :> x, s1) | (x,s1) <- parseInfx (write Equal) s0 db ]
+  ++ [ (NEqual :> x, s1) | (x,s1) <- parseInfx (write NEqual) s0 db ]
+  ++ [ (Header :> [x], s1) | ([x],s1) <- parsePrefx (write Header) s0 db ]
+  ++ [ (Args :> [x], s1) | ([x],s1) <- parsePrefx (write Args) s0 db ]
+  ++ [ (Replace :> [x], s1) | ([x],s1) <- parsePrefx (write Replace) s0 db ]
 
 -- | Read prefix expression
-readPrefx :: Int -> String -> ReadS [PTerm]
-readPrefx p str r = [ (x,t) | (str,s) <- lex r,
-                              (x,t) <- readParen True (readsPrec p) s ]
+parsePrefx :: String -> ParserS [PTerm]
+parsePrefx pref s0 = [ (x,t) | (pref,s1) <- lex s0,
+                                (x,t) <- parseParen True (parsesPrec p) s ]
 
 -- | Read infix expression
-readInfx :: Int -> String -> ReadS [PTerm]
-readInfx p str r = [ (x:xs,t) | (x,s) <- readParen False (readsPrec p) r,
+parseInfx :: String -> ParserS [PTerm]
+parseInfx p str r = [ (x:xs,t) | (x,s) <- parseParen False (parsesPrec p) r,
                                 (xs,t) <- f p str s ]
   where
-    f :: Int -> String -> ReadS [PTerm]
-    f p str s = case lex s of
-      [(str,u)] -> [ (x:xs,t) | (x,w) <- readParen False (readsPrec p) u,
+    f :: String -> ParserS [PTerm]
+    f str s = case lex s of
+      [(str,u)] -> [ (x:xs,t) | (x,w) <- parseParen False (parsesPrec p) u,
                               (xs,t) <- f p str w ]
       _         -> [([],s)]
+
+-- | Write a program term
+writePTerm :: PTerm -> LSymbols -> String
+writePTerm (T x, db)            = write x db
+writePTerm (Not :> x, db)       = writePrefx Not x db
+writePTerm (And :> x, db)       = writeInfx And x db
+writePTerm (Or :> x, db)        = writeInfx Or x db
+writePTerm (Equal :> x, db)     = writeInfx Equal x db
+writePTerm (NEqual :> x, db)    = writeInfx NEqual x db
+writePTerm (Args :> x, db)      = writePrefx Args x db
+writePTerm (Replace :> x, db)   = writePrefx Replace x db
+
+-- | Show prefix expression
+writePrefx :: PSymbol -> [PTerm] -> LSymbols -> String
+writePrefx x [t] db = case write t db of
+  y@('(':_) -> write x db ++ y
+  y         -> write x db ++ "(" ++ y ++ ")"
+writePrefx x ts db =
+  write x db ++ "[" ++ intercalate ", " (map (\t -> write t db) ts) ++ "]"
+
+-- | Show infix expression
+writeInfx :: PSymbol -> [PTerm] -> LSymbols -> String
+writeInfx x ts db =
+  "(" ++ intercalate (" " ++ write x db ++ " ") (map (\t -> write t db) ts) ++ ")"
 
 ------------------------------------------------------------------------------------------
 -- Composing functions

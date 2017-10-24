@@ -85,98 +85,182 @@ data Program
 type Programs = M.Map LSymbol Program
 
 ------------------------------------------------------------------------------------------
--- Show instances
+-- Parser instances
 
--- | Show instance for Program
-instance Show Program where
-  show = showProgram ""
+-- | Parser instance for Program
+instance Parser Program where
+  parse_ = parseProgram 0
+  write  = writeProgram 0
 
--- | Show a program fragment corresponding to a given indent
-showProgram :: String -> Program -> String
+-- | Parse a program fragment corresponding to a given indent
+parseProgram :: Int -> ParserS Program
+parseProgram ind str db
+  =  parseAssign ind str db
+  ++ parseBranch ind str db
+  ++ parseSwitch ind str db
+  ++ parseAction ind str db
+  ++ parseEmpty  ind str db
 
--- | Show an assigning instruction of program fragment corresponding to a given indent
-showProgram ind (Assign vl v g c p) = let x = var v :: PSymbol
-  in ind ++ show x ++ " <- " ++ show g ++ " | " ++ show c ++ "\n" ++ showProgram ind p
+-- | Skip in a string a given pattern
+skip :: String -> String -> String
+skip str pat = case (str =~ pat :: (String, String, String)) of
+  ("",_,r) -> r
 
--- | Show a branching instruction of program fragment corresponding to a given indent
-showProgram ind (Branch vl c b p) =
-  ind ++ show c ++ "\n" ++ showProgram (' ':' ':ind) b ++ showProgram ind p
+-- | Skip in a string a given number of indents
+skipIndent :: Int -> String -> String
+skipIndent 0 str = str
+skipIndent n (' ':' ':str) = skipIndent (n-1) str
 
--- | Show a switching instruction of program fragment corresponding to a given indent
-showProgram ind (Switch vl e cl p) =
-  foldl f (ind ++ "case " ++ show e ++ " of\n") $ zip cl [1 .. length cl]
+-- | Parse a given indent
+parseIndent :: Int -> String -> [String]
+parseIndent ind str
+  =  [(a:_) <- [skipIndent ind], not isSeparator a ]
+  ++ [(a:_) <- parseIndent ind $ skip str " *\\n", not isSeparator a ]
+
+-- | Parse a where statement of program fragment corresponding to a given indent
+parseWhere :: Int -> ParserS PTerm
+parseWhere ind s0 db
+  =  [ (x, s1) | (x,s1) <- parsePTerm (skip s0 " +where +") db, isBool t ]
+  ++ [ (x, s2) | s1 <- parseIndent ind s0,
+                 (x,s2) <- parseWhere (ind+1) (skip s1 "where") db ]
+  ++ [ (P.and x y, s3) | s1 <- parseIndent ind s0,
+                         (x,s2) <- parsePTerm s1 db, isBool t,
+                         (y,s3) <- parseWhere ind s2 db ]
+  ++ [ ([], s0) | (a:_) <- parseIndent (ind-2) s0, not isSeparator a ]
+
+-- | Parse an assigning instruction of program fragment corresponding to a given indent
+parseAssign :: Int -> ParserS Program
+parseAssign ind s0 db
+  =  [ (Assign pat (P.list val) cond jump, s5) |
+       s1 <- parseIndent ind s0,
+       (pat,s2) <- parsePTerm s1 db,
+       (val,s3) <- parsePTerm (skip s2 " += +") db,
+       (cond,s4) <- parseWhere (ind+1) s3 db,
+       (jump,s5) <- parseProgram ind s4 db ]
+  ++ [ (Assign pat gen cond jump, s5) |
+       s1 <- parseIndent ind s0,
+       (pat,s2) <- parsePTerm s1 db,
+       (gen,s3) <- parsePTerm (skip s2 " +<- +") db,
+       (cond,s4) <- parseWhere (ind+1) s3 db,
+       (jump,s5) <- parseProgram ind s4 db ]
+
+-- | Parse a branching instruction of program fragment corresponding to a given indent
+parseBranch :: Int -> ParserS Program
+parseBranch ind s0 db
+  =  [ (Branch cond br jump, s5) |
+       s1 <- parseIndent ind s0,
+       (cond,s2) <- parsePTerm (skip s1 "if ") db, isBool cond,
+       s3 <- parseIndent ind s2,
+       (br,s4) <- parseProgram (ind+1) (skip s3 "do") db,
+       (jump,s5) <- parseProgram ind s4 db ]
+
+-- | Parse a case of switching instruction corresponding to a given indent
+parseSwitchCases :: Int -> ParserS [Program]
+parseSwitchCases ind s0 db
+  =  [ ((pat,prog):cs, s5) |
+       s1 <- parseIndent ind s0,
+       (pat,s2) <- parsePTerm s1 db,
+       s3 <- parseIndent ind s2,
+       (prog,s4) <- parseProgram (ind+1) (skip s3 "do") db,
+       (cs,s5) <- parseSwitchCases ind s4 db ]
+  ++ [ (lift [], s0) |
+       (a:_) <- parseIndent (ind-2) s0, not isSeparator a ]
+
+-- | Parse a switching instruction of program fragment corresponding to a given indent
+parseSwitch :: Int -> ParserS Program
+parseSwitch ind s0 db
+  =  [ (Switch expr cs jump, s4) |
+       s1 <- parseIndent ind s0,
+       (expr,s2) <- parsePTerm (skip s1 "case ") db,
+       (cs,s3) <- parseSwitchCases (ind+1) (skip s2 " *of") db,
+       (jump,s4) <- parseProgram ind s3 db ]
+
+-- | Parse an acting instruction of program fragment corresponding to a given indent
+parseAction :: Int -> ParserS Program
+parseAction ind s0 db
+  =  [ (Action act cond jump, s4) |
+       s1 <- parseIndent ind s0,
+       (act,s2) <- parsePTerm s1 db, isAction act,
+       (cond,s3) <- parseWhere (ind+1) s2 db,
+       (jump,s4) <- parseProgram ind s3 db ]
+
+-- | Parse an empty program fragment corresponding to a given indent
+parseEmpty :: Int -> ParserS Program
+parseEmpty ind s0 db
+  =  [ (Empty, s2) |
+       s1 <- parseIndent ind s0,
+       s2 <- [skip s1 "done"] ]
+
+writeIndent :: Int -> String
+writeIndent 0 = ""
+writeIndent n = ' ' : ' ' : writeIndent (n-1)
+
+writeWhere :: Int -> [PTerm] -> LSymbols -> String
+writeWhere ind (t:ts) db = writeIndent ind ++ write t db ++ "\n" ++ writeWhere ind ts db
+writeWhere ind [] db = ""
+
+-- | Write a program fragment corresponding to a given indent
+writeProgram :: Int -> Program -> LSymbols -> String
+
+-- | Write an assigning instruction of program fragment corresponding to a given indent
+writeProgram ind (Assign pat (List :> [val]) (And :> cs) jump) db =
+  writeIndent ind ++ write pat db ++ " = " ++ write val db  ++ "\n" ++
+  writeIndent ind ++ "  where\n" ++
+  writeWhere (ind+2) cs db ++
+  writeProgram ind jump db
+
+writeProgram ind (Assign pat (List :> [val]) cond jump) db =
+  writeIndent ind ++ write pat db  ++ " = " ++ write val db  ++
+  " where " ++ write cond db  ++
+  writeProgram ind jump db
+
+writeProgram ind (Assign pat gen (And :> cs) jump) db =
+  writeIndent ind ++ write pat db  ++ " <- " ++ write gen db  ++ "\n" ++
+  writeIndent ind ++ "  where\n" ++
+  writeWhere (ind+2) cs db ++
+  writeProgram ind jump db
+
+writeProgram ind (Assign pat gen cond jump) db =
+  writeIndent ind ++ write pat db  ++ " <- " ++ write gen db  ++
+  " where " ++ write cond db  ++
+  writeProgram ind jump db
+
+-- | Write a branching instruction of program fragment corresponding to a given indent
+writeProgram ind (Branch cond br jump) db =
+  writeIndent ind ++ "if " ++ write cond db  ++ "\n" ++
+  writeIndent ind ++ "do\n" ++
+  writeProgram (ind+1) (br,db) ++
+  writeProgram ind jump db
+
+-- | Write a switching instruction of program fragment corresponding to a given indent
+writeProgram ind (Switch expr cs jump) db =
+  writeIndent ind ++ "case " ++ write expr db  ++ " of\n" ++
+  writeSwitchCases (ind+1) cs db ++
+  writeProgram ind jump db
   where
-    f :: String -> (Program, Int) -> String
-    f x (y,i) = x ++ (' ':ind) ++ show i ++ ":\n" ++ showProgram (' ':' ':ind) y
+    writeSwitchCases :: Int -> [(PTerm, Program)] -> LSymbols -> String
+    writeSwitchCases ind ((pat,prog):cs) db =
+      writeIndent ind ++ write pat db  ++ "\n" ++
+      writeIndent ind ++ "do\n" ++
+      writeProgram (ind+1) (prog,db) ++
+      writeSwitchCases ind cs db
+    writeSwitchCases ind [] db = ""
 
--- | Show an acting instruction of program fragment corresponding to a given indent
-showProgram ind (Action vl t) = ind ++ show t
+-- | Write an acting instruction of program fragment corresponding to a given indent
+writeProgram ind (Action act (And :> cs) jump) db =
+  writeIndent ind ++ write act db  ++ "\n" ++
+  writeIndent ind ++ "  where\n" ++
+  writeWhere (ind+2) cs db ++
+  writeProgram ind jump db
 
--- | Show an empty program fragment corresponding to a given indent
-showProgram ind Empty = ""
+writeProgram ind (Action act cond jump) db =
+  writeIndent ind ++ write act db  ++
+  " where " ++ write cond db  ++
+  writeProgram ind jump db
 
-------------------------------------------------------------------------------------------
--- Read instances
-
--- | Read instance for Program
-instance Read Program where
-  readsPrec p = readProgram p 0
-
--- | Read a program fragment corresponding to a given indent
-readProgram :: Int -> Int -> ReadS Program
-readProgram p ind r =  readAssign p ind r
-                    ++ readBranch p ind r
-                    ++ readSwitch p ind r
-                    ++ readAction p ind r
-                    ++ readEmpty  p ind r
-
--- | Read an assigning instruction of program fragment corresponding to a given indent
-readAssign :: Int -> Int -> ReadS Program
-readAssign i ind r =
-  [ (Assign [] (eval x) g c p, w) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
-                                    (x, ' ':'<':'-':' ':t) <- readPSymbol i s,
-                                    (g, ' ':'|':' ':u) <- readPTerm i t,
-                                    (c, '\n':v) <- readPTerm i u,
-                                    (p, w) <- readProgram i ind v ]
-
--- | Read a branching instruction of program fragment corresponding to a given indent
-readBranch :: Int -> Int -> ReadS Program
-readBranch i ind r =
-  [ (Branch [] c b p, v) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
-                           (c, '\n':t) <- readPTerm i s,
-                           (b, u) <- readProgram i (ind+2) t,
-                           (p, v) <- readProgram i ind u ]
-
--- | Read a case of switching instruction corresponding to a given indent
-readSwitchCases :: Int -> Int -> ReadS [Program]
-readSwitchCases i ind r =  [ (p:cl, v) | (' ':s@(a:_)) <- [skipSpaces r ind], isDigit a,
-                                         (x, ':':'\n':t) <- lex s, all isDigit x,
-                                         (p, u) <- readProgram i (ind+2) t,
-                                         (cl, v) <- readSwitchCases i ind u ]
-                        ++ [ ([], r) | (a:s) <- [skipSpaces r ind],  a /= ' ' ]
-
--- | Read a switching instruction of program fragment corresponding to a given indent
-readSwitch :: Int -> Int -> ReadS Program
-readSwitch i ind r =
-  [ (Switch [] e cl p, v) | ('c':'a':'s':'e':' ':s) <- [skipSpaces r ind],
-                            (e, ' ':'o':'f':'\n':t) <- readPTerm i s,
-                            (cl, u) <- readSwitchCases i ind t,
-                            (p, v) <- readProgram i ind u  ]
-
--- | Read an acting instruction of program fragment corresponding to a given indent
-readAction :: Int -> Int -> ReadS Program
-readAction i ind r =
-  [ (Action [] t, u) | s@(a:_) <- [skipSpaces r ind], a /= ' ',
-                       (t, '\n':u) <- readPTerm i s, isAction t ]
-
--- | Read an empty program fragment corresponding to a given indent
-readEmpty :: Int -> Int -> ReadS Program
-readEmpty i ind "" = [(Empty, "")]
-
--- | Skip in a string a given number of spaces
-skipSpaces :: String -> Int -> String
-skipSpaces str 0       = str
-skipSpaces (' ':str) n = skipSpaces str (n-1)
+-- | Write an empty program fragment corresponding to a given indent
+writeProgram ind Empty db =
+  writeIndent ind ++ "done"
 
 ------------------------------------------------------------------------------------------
 -- Database instances
