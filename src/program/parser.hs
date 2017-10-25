@@ -33,6 +33,18 @@ class Parser a where
 ------------------------------------------------------------------------------------------
 -- Function
 
+parseParen :: ParserS a -> ReadS a
+parseParen p s0 = do
+  ("(",s1) <- lex s0
+  (x,s2)   <- p s1
+  (")",s3) <- lex s2
+  return (x,s3)
+
+-- | Skip a pattern in a given string
+skip :: String -> String -> String
+skip pat str = case (str =~ pat :: (String, String, String)) of
+  ("",_,r) -> r
+
 parseEither :: Parser a => String -> LSymbols -> Either String a
 parseEither str db =
 case [ x | (x,"") <- parse_ str db ] of

@@ -111,27 +111,76 @@ parsePTerm s0 db
   ++ [ (Not :> [x], s1) | ([x],s1) <- parsePrefx (write Not) s0 db ]
   ++ [ (And :> x, s1) | (x,s1) <- parseInfx (write And) s0 db ]
   ++ [ (Or :> x, s1) | (x,s1) <- parseInfx (write Or) s0 db ]
-  ++ [ (Equal :> x, s1) | (x,s1) <- parseInfx (write Equal) s0 db ]
-  ++ [ (NEqual :> x, s1) | (x,s1) <- parseInfx (write NEqual) s0 db ]
-  ++ [ (Header :> [x], s1) | ([x],s1) <- parsePrefx (write Header) s0 db ]
+  ++ [ (Equal :> x, s1) | (x,s1) <- parseInfx2 (write Equal) s0 db ]
+  ++ [ (NEqual :> x, s1) | (x,s1) <- parseInfx2 (write NEqual) s0 db ]
   ++ [ (Args :> [x], s1) | ([x],s1) <- parsePrefx (write Args) s0 db ]
   ++ [ (Replace :> [x], s1) | ([x],s1) <- parsePrefx (write Replace) s0 db ]
 
--- | Read prefix expression
-parsePrefx :: String -> ParserS [PTerm]
-parsePrefx pref s0 = [ (x,t) | (pref,s1) <- lex s0,
-                                (x,t) <- parseParen True (parsesPrec p) s ]
+parsePTerms :: Bool -> Bool -> ParserS [PTerm]
+parsePTerms par whole s0 db
+  =  [ ([t], s1) |
+       (t, s1) <- parsesPTerm False True (skip "\\s*" s0) db,
+       (")", s2) <- lex s1 ]
+  ++ [ ([t], s1) |
+       (t, s1) <- parsePTerm False True (skip "\\s*" s0) db,
+       ("]", s2) <- lex s1 ]
+  ++ [ (t:ts, s3) |
+       (t, s1) <- parsePTerm False True (skip "\\s*" s0) db,
+       (",", s2) <- lex s1,
+       (ts, s3) <- parsePTerms par whole (skip "\\s*" s2) db ]
 
--- | Read infix expression
-parseInfx :: String -> ParserS [PTerm]
-parseInfx p str r = [ (x:xs,t) | (x,s) <- parseParen False (parsesPrec p) r,
-                                (xs,t) <- f p str s ]
-  where
-    f :: String -> ParserS [PTerm]
-    f str s = case lex s of
-      [(str,u)] -> [ (x:xs,t) | (x,w) <- parseParen False (parsesPrec p) u,
-                              (xs,t) <- f p str w ]
-      _         -> [([],s)]
+parseList :: Bool -> Bool -> ParserS [PTerm]
+parseList par whole s0 db
+  =  [ (ts, s3) |
+       ("[", s1) <- lex s0,
+       (ts, s2) <- parsePTerms par whole s1 db,
+       ("]", s3) <- lex s2 ]
+
+parseTuple :: Bool -> Bool -> ParserS PTerm
+parseTuple par whole s0 db
+  =  [ (Tuple :> ts, s3) |
+       ("(", s1) <- lex s0,
+       (ts, s2) <- parsePTerms par whole s1 db,
+       (")", s3) <- lex s2 ]
+
+-- | Parse prefix expression
+parsePrefx :: Bool -> Bool -> ParserS PTerm
+parsePrefx par whole s0 db
+  =  [ (Not :> [t], s2) | ("no", s1) <- lex s0,
+                          (t,s2) <- parsePTerm True True s1 db ]
+  ++ [ (Args :> [t], s2) | ("args", s1) <- lex s0,
+                           (t,s2) <- parsePTerm True True s1 db ]
+  ++ [ (Replace :> [t1, t2], s3) | ("replace", s1) <- lex s0,
+                                   (t1,s2) <- parsePTerm True True s1 db,
+                                   (t2,s3) <- parsePTerm True True s2 db ]
+
+parseInfxName :: String -> Bool -> Bool -> ParserS [PTerm]
+parseInfxName name par whole s0 db
+  =  [ (t:ts, s3) | (x, s1) <- lex s0, x == name,
+                    (t, s2) <- parsePTerm True True s1 db,
+                    (ts, s3) <- parseInfxName name True True s2 db ]
+  ++ [ ([], s0) | (x, s1) <- lex s0, x \= name ]
+
+-- | Parse infix expression
+parseInfx :: Bool -> Bool -> ParserS PTerm
+parseInfx par whole s0 db
+  =  [ (And :> t:ts, s2) | (t, s1) <- parsePTerm True True s0 db,
+                           ("and", _) <- lex s1,
+                           (ts, s2) <- parseInfxName "and" True True s1 db ]
+  ++ [ (Or :> t:ts, s2) | (t, s1) <- parsePTerm True True s0 db,
+                          ("or", _) <- lex s1,
+                          (ts, s2) <- parseInfxName "or" True True s1 db ]
+  ++ [ (Equal :> [t1,t2], s2) | (t1, s1) <- parsePTerm True True s0 db,
+                                ("eq", _) <- lex s1,
+                                ([t2], s2) <- parseInfxName "eq" True True s1 db ]
+  ++ [ (NEqual :> [t1,t2], s2) | (t1, s1) <- parsePTerm True True s0 db,
+                                 ("ne", _) <- lex s1,
+                                 ([t2], s2) <- parseInfxName "ne" True True s1 db ]
+
+-- | Parse infix expression with two arguments
+parseInfx2 :: String -> ParserS [PTerm]
+parseInfx2 infx s0 = [ (x:xs,t) | (x,s) <- parseParen False (parsesPrec p) r,
+      (xs,t) <- f p str s ]
 
 -- | Write a program term
 writePTerm :: PTerm -> LSymbols -> String

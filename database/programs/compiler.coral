@@ -1,8 +1,8 @@
-header t
+header p1
 do
   if Compiler
   do -- Parse the header of inference rule
-    case t of
+    case p1 of
       left-to-right
       do
         LeftToRight = True
@@ -14,27 +14,26 @@ do
     done
   done
 
-theorem t
+theorem p1
 do
   if Compiler
   do -- Parse the theorem of inference rule
-    case t of
-      forall [boundVariables v, premises p, conclusion [c]]
+    case p1 of
+      forall [boundVariables p2, premises p3, conclusion [p4]]
       do
-        Bounds = v
-        Premises = p
-        g [l,r] = c where g in [equality, equivalence]
-        (From,To) = LeftToRight ? (l,r) : (r,l)
+        Bounds = p2
+        Premises = p3
+        g [p5,p6] = p4 where g in [equality, equivalence]
+        (From,To) = LeftToRight ? (p5,p6) : (p6,p5)
         done
     done
-  (neg [i], plus [a,b]) <- args t
   done
 
-plus t
+plus p1
 do
-  case t of
-    equality [plus [x1, x2], plus [neg [x1], x3]]
+  case p1 of
+    equality [plus [p2, p3], plus [neg [p2], p4]]
     do
-      replace t (equality [x2, neg [x3]])
+      replace t (equality [p3, neg [p4]])
       done
   done

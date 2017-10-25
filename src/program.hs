@@ -101,11 +101,6 @@ parseProgram ind str db
   ++ parseAction ind str db
   ++ parseEmpty  ind str db
 
--- | Skip in a string a given pattern
-skip :: String -> String -> String
-skip str pat = case (str =~ pat :: (String, String, String)) of
-  ("",_,r) -> r
-
 -- | Skip in a string a given number of indents
 skipIndent :: Int -> String -> String
 skipIndent 0 str = str
@@ -115,14 +110,14 @@ skipIndent n (' ':' ':str) = skipIndent (n-1) str
 parseIndent :: Int -> String -> [String]
 parseIndent ind str
   =  [(a:_) <- [skipIndent ind], not isSeparator a ]
-  ++ [(a:_) <- parseIndent ind $ skip str " *\\n", not isSeparator a ]
+  ++ [(a:_) <- parseIndent ind $ skip " *\\n" str, not isSeparator a ]
 
 -- | Parse a where statement of program fragment corresponding to a given indent
 parseWhere :: Int -> ParserS PTerm
 parseWhere ind s0 db
-  =  [ (x, s1) | (x,s1) <- parsePTerm (skip s0 " +where +") db, isBool t ]
+  =  [ (x, s1) | (x,s1) <- parsePTerm (skip " +where +" s0) db, isBool t ]
   ++ [ (x, s2) | s1 <- parseIndent ind s0,
-                 (x,s2) <- parseWhere (ind+1) (skip s1 "where") db ]
+                 (x,s2) <- parseWhere (ind+1) (skip "where" s1) db ]
   ++ [ (P.and x y, s3) | s1 <- parseIndent ind s0,
                          (x,s2) <- parsePTerm s1 db, isBool t,
                          (y,s3) <- parseWhere ind s2 db ]
@@ -134,13 +129,13 @@ parseAssign ind s0 db
   =  [ (Assign pat (P.list val) cond jump, s5) |
        s1 <- parseIndent ind s0,
        (pat,s2) <- parsePTerm s1 db,
-       (val,s3) <- parsePTerm (skip s2 " += +") db,
+       (val,s3) <- parsePTerm (skip " += +" s2) db,
        (cond,s4) <- parseWhere (ind+1) s3 db,
        (jump,s5) <- parseProgram ind s4 db ]
   ++ [ (Assign pat gen cond jump, s5) |
        s1 <- parseIndent ind s0,
        (pat,s2) <- parsePTerm s1 db,
-       (gen,s3) <- parsePTerm (skip s2 " +<- +") db,
+       (gen,s3) <- parsePTerm (skip " +<- +" s2) db,
        (cond,s4) <- parseWhere (ind+1) s3 db,
        (jump,s5) <- parseProgram ind s4 db ]
 
@@ -149,9 +144,9 @@ parseBranch :: Int -> ParserS Program
 parseBranch ind s0 db
   =  [ (Branch cond br jump, s5) |
        s1 <- parseIndent ind s0,
-       (cond,s2) <- parsePTerm (skip s1 "if ") db, isBool cond,
+       (cond,s2) <- parsePTerm (skip "if " s1) db, isBool cond,
        s3 <- parseIndent ind s2,
-       (br,s4) <- parseProgram (ind+1) (skip s3 "do") db,
+       (br,s4) <- parseProgram (ind+1) (skip "do" s3) db,
        (jump,s5) <- parseProgram ind s4 db ]
 
 -- | Parse a case of switching instruction corresponding to a given indent
@@ -161,7 +156,7 @@ parseSwitchCases ind s0 db
        s1 <- parseIndent ind s0,
        (pat,s2) <- parsePTerm s1 db,
        s3 <- parseIndent ind s2,
-       (prog,s4) <- parseProgram (ind+1) (skip s3 "do") db,
+       (prog,s4) <- parseProgram (ind+1) (skip "do" s3) db,
        (cs,s5) <- parseSwitchCases ind s4 db ]
   ++ [ (lift [], s0) |
        (a:_) <- parseIndent (ind-2) s0, not isSeparator a ]
@@ -171,8 +166,8 @@ parseSwitch :: Int -> ParserS Program
 parseSwitch ind s0 db
   =  [ (Switch expr cs jump, s4) |
        s1 <- parseIndent ind s0,
-       (expr,s2) <- parsePTerm (skip s1 "case ") db,
-       (cs,s3) <- parseSwitchCases (ind+1) (skip s2 " *of") db,
+       (expr,s2) <- parsePTerm (skip "case " s1) db,
+       (cs,s3) <- parseSwitchCases (ind+1) (skip " *of" s2) db,
        (jump,s4) <- parseProgram ind s3 db ]
 
 -- | Parse an acting instruction of program fragment corresponding to a given indent
@@ -189,7 +184,7 @@ parseEmpty :: Int -> ParserS Program
 parseEmpty ind s0 db
   =  [ (Empty, s2) |
        s1 <- parseIndent ind s0,
-       s2 <- [skip s1 "done"] ]
+       s2 <- [skip "done" s1] ]
 
 writeIndent :: Int -> String
 writeIndent 0 = ""
