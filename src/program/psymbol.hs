@@ -110,6 +110,7 @@ instance Parser PTerm where
   parse_ = parsePTerm
   write  = writePTerm
 
+-- | List of keyword of program symbols
 keywords :: [String]
 keywords = map show [Not, And, Or, Equal, NEqual, Args, Replace]
 
@@ -228,17 +229,18 @@ parsePTerm par s0 db
   ++ parseArgs s0 db
   ++ parseReplace s0 db
 
-writeSequence :: String -> Bool -> [PTerm] -> LSymbols -> String
-writeSequence sep par [t] db = writePTerm False t db
-writeSequence sep (t:ts) db = writePTerm False t db ++ ", " ++ writeSequence ts db
+-- | Write sequence of program terms
+writeSequence :: [PTerm] -> LSymbols -> String
+writeSequence [t] db = writePTerm False t db
+writeSequence (t:ts) db = writePTerm False t db ++ ", " ++ writeSequence ts db
 
--- | Show prefix expression
+-- | Write prefix expression
 writePrefx :: PSymbol -> [PTerm] -> LSymbols -> String
 writePrefx x [t] db = writePSymbol x db ++ writePTerm True t db
 writePrefx x ts db =
   writePSymbol x db ++ intercalate " " (map (\t -> writePTerm True t db) ts)
 
--- | Show infix expression
+-- | Write infix expression
 writeInfx :: PSymbol -> [PTerm] -> LSymbols -> String
 writeInfx x ts db =
   intercalate (" " ++ writePSymbol x db ++ " ") (map (\t -> writePTerm True t db) ts)
@@ -281,6 +283,26 @@ instance Cons Bool PTerm  where cons c = T (B c)
 instance Cons LSymbol PSymbol where cons = S
 instance Cons LSymbol PTerm  where cons c = T (S c)
 
+-- | Allows to define function with variable number of arguments
+--   For example: if func :: [a] -> a, then (func <> []) :: a -> ... -> a -> a
+--   and (func <> []) a1 ... an == func [a1, ..., an] for all n >= 0
+class VarArgs a where
+  (<>) :: ([PTerm] -> PTerm) -> [PTerm] -> a
+instance VarArgs PTerm where (<>) f ts = f $ reverse ts
+instance VarArgs (PTerm -> a) where (<>) f ts t = group f t:ts
+
+-- | Tuple of program terms
+tuple' :: [PTerm] -> PTerm
+tuple' ts = Tuple :> ts
+tuple :: (VarArgs a) => a
+tuple = tuple' <> []
+
+-- | List of program terms
+list' :: [PTerm] -> PTerm
+list' ts = List :> ts
+list :: (VarArgs a) => a
+list = list' <> []
+
 -- | Negate a given program term
 not :: PTerm -> PTerm
 not (Equal  :> ts) = NEqual :> ts
@@ -321,10 +343,6 @@ eq x y = Equal :> [x,y]
 -- | Return a program term which is the negation of equality of a given program terms
 neq :: PTerm -> PTerm -> PTerm
 neq x y = NEqual :> [x,y]
-
--- | Return a program term which is the header of a given program term
-header :: PTerm -> PTerm
-header t = Header :> [t]
 
 -- | Return a program term which is the list of arguments of a given program term
 args :: PTerm -> PTerm
