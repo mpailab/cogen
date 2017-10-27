@@ -24,18 +24,18 @@ Warning: Constructors of program symbols are private, do not exporte it.
 module Program.PSymbol
     (
       -- exports
-      PSymbol, PTerm,
-      readPSymbol, readPTerm,
+      PSymbol (List, And), PTerm,
+      parsePTerm,
       var, cons,
+      Program.PSymbol.list, list',
       Program.PSymbol.not,
-      Program.PSymbol.and,
-      Program.PSymbol.or,
+      Program.PSymbol.and, and',
+      Program.PSymbol.or, or',
       Program.PSymbol.eq,
       Program.PSymbol.neq,
-      Program.PSymbol.header,
       Program.PSymbol.args,
       eval,
-      isAction
+      isAction, isBool
     )
 where
 
@@ -117,6 +117,12 @@ instance Parser PTerm where
   parse_ = parsePTerm
   write  = writePTerm False
 
+keywordsBool :: [PSymbol]
+keywordsBool = [Not, And, Or, Equal, NEqual]
+
+keywordsAction :: [PSymbol]
+keywordsAction = [Replace]
+
 -- | List of keyword of program symbols
 keywords :: [PSymbol]
 keywords = [Not, And, Or, Equal, NEqual, In, Args, Replace]
@@ -153,8 +159,8 @@ parseBlock s0 db
 
 parseSequence :: String -> ParserS [PTerm]
 parseSequence sep s0 db
-  =  [ ([t], s1) | (t, s1) <- parsesPTerm (skip "\\s*" s0) db,
-                   (x, s2) <- lex s1, x \= sep ]
+  =  [ ([t], s1) | (t, s1) <- parsePTerm (skip "\\s*" s0) db,
+                   (x, s2) <- lex s1, x /= sep ]
   ++ [ (t:ts, s3) | (t, s1) <- parsePTerm (skip "\\s*" s0) db,
                     (x, s2) <- lex s1, x == sep,
                     (ts, s3) <- parseSequence sep (skip "\\s*" s2) db ]
@@ -165,20 +171,20 @@ parseSymbol s0 db
                    ("",_) <- parseBlock s1 db ]
 
 parseVariable :: ParserS PTerm
-parseVariable so db
-  =  [ (x :> ts, s1) | (x@(X _),s1) <- parseSymbol s0 db,
+parseVariable s0 db
+  =  [ (x :> ts, s1) | (T x@(X _),s1) <- parseSymbol s0 db,
        (List :> ts,s2) <- parseList s1 db,
        ("",_) <- parseBlock s2 db ]
-  ++ [ (x :>> t, s1) | (x@(X _),s1) <- parseSymbol s0 db,
+  ++ [ (x :>> t, s1) | (T x@(X _),s1) <- parseSymbol s0 db,
        (t,s2) <- parsePTerm s1 db,
        ("",_) <- parseBlock s2 db ]
 
 parseLSymbol :: ParserS PTerm
-parseLSymbol so db
-  =  [ (x :> ts, s1) | (x@(S _),s1) <- parseSymbol s0 db,
+parseLSymbol s0 db
+  =  [ (x :> ts, s1) | (T x@(S _),s1) <- parseSymbol s0 db,
                        (List :> ts,s2) <- parseList s1 db,
                        ("",_) <- parseBlock s2 db ]
-  ++ [ (x :>> t, s1) | (x@(S _),s1) <- parseSymbol s0 db,
+  ++ [ (x :>> t, s1) | (T x@(S _),s1) <- parseSymbol s0 db,
                        (t,s2) <- parsePTerm s1 db,
                        ("",_) <- parseBlock s2 db ]
 
@@ -220,7 +226,7 @@ parseNEqual s0 db
 
 parseIn :: ParserS PTerm
 parseIn s0 db
-  = [ (In :> ts, s2) | (ts@[_,_], s1) <- parseSequence "in" s0 db ]
+  = [ (In :> ts, s1) | (ts@[_,_], s1) <- parseSequence "in" s0 db ]
 
 parseArgs :: ParserS PTerm
 parseArgs s0 db
@@ -258,7 +264,7 @@ writeSequence (t:ts) db = writePTerm False t db ++ ", " ++ writeSequence ts db
 writePrefx :: PSymbol -> [PTerm] -> LSymbols -> String
 writePrefx x [t] db = writePSymbol x db ++ writePTerm True t db
 writePrefx x ts db =
-  writePSymbol x db ++ intercalate " " (map (\t -> writePTerm True t db) ts)
+  writePSymbol x db ++ unwords (map (\t -> writePTerm True t db) ts)
 
 -- | Write infix expression
 writeInfx :: PSymbol -> [PTerm] -> LSymbols -> String
@@ -267,7 +273,7 @@ writeInfx x ts db =
 
 -- | Write a program term
 writePTerm :: Bool -> PTerm -> LSymbols -> String
-writePTerm par t db = let s = f t in if par && snd s then "(" ++ s ++ ")" else s
+writePTerm par t db = let (x,y) = f t in if par && y then "(" ++ x ++ ")" else x
   where
     f (T x)            = (writePSymbol x db, False)
     f (x@(X _) :> y)   = (writePSymbol x db ++ " [" ++ writeSequence y db ++ "]", True)
@@ -310,7 +316,7 @@ instance Cons LSymbol PTerm  where cons c = T (S c)
 class VarArgs a where
   (<>) :: ([PTerm] -> PTerm) -> [PTerm] -> a
 instance VarArgs PTerm where (<>) f ts = f $ reverse ts
-instance VarArgs (PTerm -> a) where (<>) f ts t = group f t:ts
+instance VarArgs a => VarArgs (PTerm -> a) where (<>) f ts t = f <> (t:ts)
 
 -- | Tuple of program terms
 tuple' :: [PTerm] -> PTerm
@@ -331,10 +337,10 @@ not (NEqual :> ts) = Equal :> ts
 not t              = Not :> [t]
 
 -- | Take the logical and of a given program terms
-and :: [PTerm] -> PTerm
-and [] = T (B True)
-and [t] = t
-and (t:s) = And :> case (t, Program.PSymbol.and s) of
+and' :: [PTerm] -> PTerm
+and' [] = T (B True)
+and' [t] = t
+and' (t:s) = And :> case (t, and' s) of
   (T (B True), y)        -> [y]
   (x@(T (B False)), y)   -> [x]
   (x, T (B True))        -> [x]
@@ -344,10 +350,13 @@ and (t:s) = And :> case (t, Program.PSymbol.and s) of
   (x, And :> ys)         -> x : ys
   (x, y)                 -> [x, y]
 
+and :: (VarArgs a) => a
+and = and' <> []
+
 -- | Take the logical or of a given program terms
-or :: [PTerm] -> PTerm
-or [t] = t
-or (t:s) = Or :> case (t, Program.PSymbol.or s) of
+or' :: [PTerm] -> PTerm
+or' [t] = t
+or' (t:s) = Or :> case (t, or' s) of
   (x@(T (B True)), y)  -> [x]
   (T (B False), y)     -> [y]
   (x, y@(T (B True)))  -> [y]
@@ -356,6 +365,9 @@ or (t:s) = Or :> case (t, Program.PSymbol.or s) of
   (Or :> xs, y)        -> xs ++ [y]
   (x, Or :> ys)        -> x : ys
   (x, y)               -> [x, y]
+
+or :: (VarArgs a) => a
+or = or' <> []
 
 -- | Return a program term which is the equality of a given program terms
 eq :: PTerm -> PTerm -> PTerm
@@ -423,5 +435,7 @@ instance Eval (Term a -> [Term a]) where
 
 -- | Does a program term correspond to an action
 isAction :: PTerm -> Bool
-isAction (Replace :> _) = True
-isAction t              = False
+isAction (x :> _) = x `elem` keywordsAction
+
+isBool :: PTerm -> Bool
+isBool (x :> _) = x `elem` keywordsBool

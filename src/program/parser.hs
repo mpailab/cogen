@@ -12,7 +12,8 @@ module Program.Parser
       -- exports
       Parser, ParserS,
       parse, parse_,
-      write
+      write,
+      skip
     )
 where
 
@@ -37,7 +38,7 @@ class Parser a where
 -- | Skip a pattern in a given string
 skip :: String -> String -> String
 skip pat str = case (str =~ pat :: (String, String, String)) of
-  ("",_,r) -> r
+  (_,_,r) -> r
 
 parseEither :: Parser a => String -> LSymbols -> Either String a
 parseEither str db =

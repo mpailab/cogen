@@ -19,32 +19,30 @@ module Rule
 
 -- Internal imports
 import           LSymbol
-import           Term
 
 -- Inference rule
 data Rule = Rule
   {
     symbol      :: LSymbol,
-    theorem     :: Term,
-    header      :: Term,
-    filters     :: [Term],
-    specifiers  :: [Term],
-    normalizers :: [Term]
+    theorem     :: LTerm,
+    header      :: LTerm,
+    filters     :: [LTerm],
+    specifiers  :: [LTerm],
+    normalizers :: [LTerm]
   }
-  deriving (Read)
 
--- Show instance for Rule
-instance Show Rule where
-  show (Rule sym th h f s n) =
-       "Rule {\n"
-    ++ "  symbol      = " ++ show sym ++ ",\n"
-    ++ "  theorem     = " ++ show th ++ ",\n"
-    ++ "  header      = " ++ show h ++ ",\n"
-    ++ "  filters     = " ++ pr f ++ ",\n"
-    ++ "  specifiers  = " ++ pr s ++ ",\n"
-    ++ "  normalizers = " ++ pr n ++ "\n}"
-    where
-      pr l = case l of
-          [] -> "[]"
-          [x] -> "[" ++ show x ++ "]"
-          x:xs -> "[\n    " ++ show x ++ concatMap (\x -> ",\n    "++show x) xs ++ "\n  ]"
+-- -- Show instance for Rule
+-- instance Show Rule where
+--   show (Rule sym th h f s n) =
+--        "Rule {\n"
+--     ++ "  symbol      = " ++ show sym ++ ",\n"
+--     ++ "  theorem     = " ++ show th ++ ",\n"
+--     ++ "  header      = " ++ show h ++ ",\n"
+--     ++ "  filters     = " ++ pr f ++ ",\n"
+--     ++ "  specifiers  = " ++ pr s ++ ",\n"
+--     ++ "  normalizers = " ++ pr n ++ "\n}"
+--     where
+--       pr l = case l of
+--           [] -> "[]"
+--           [x] -> "[" ++ show x ++ "]"
+--           x:xs -> "[\n    " ++ show x ++ concatMap (\x -> ",\n    "++show x) xs ++ "\n  ]"

@@ -72,7 +72,7 @@ instance Database String Programs Global where
 
 -- Instances of Database for reading/writing a program of logical symbol in monad Global
 instance Database (String, LSymbol) Program Global where
-  load (dir, s) = getLSymbols >>= \x -> liftIO (load (dir, s, x) :: IO Programs)
+  load (dir, s) = getLSymbols >>= \x -> liftIO (load (dir, s, x) :: IO Program)
   save db (dir, s) = getLSymbols >>= \x -> liftIO (save db (dir, s, x) :: IO ())
 
 

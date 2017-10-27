@@ -1,39 +1,41 @@
-header p1
-do
-  if Compiler
-  do -- Parse the header of inference rule
-    case p1 of
-      left-to-right
-      do
-        LeftToRight = True
-        done
-      right-to-left
-      do
-        LeftToRight = False
-        done
-    done
-  done
-
-theorem p1
-do
-  if Compiler
-  do -- Parse the theorem of inference rule
-    case p1 of
-      forall [boundVariables p2, premises p3, conclusion [p4]]
-      do
-        Bounds = p2
-        Premises = p3
-        p7 [p5,p6] = p4 where p7 in [equality, equivalence]
-        (From,To) = LeftToRight ? (p5,p6) : (p6,p5)
-        done
-    done
-  done
-
-plus p1
-do
-  case p1 of
-    equality [plus [p2, p3], plus [neg [p2], p4]]
-    do
-      replace t (equality [p3, neg [p4]])
+case p0 of
+  header p1
+  do
+    if Compiler
+    do -- Parse the header of inference rule
+      case p1 of
+        left-to-right
+        do
+          LeftToRight = True
+          done
+        right-to-left
+        do
+          LeftToRight = False
+          done
       done
-  done
+    done
+
+  theorem p1
+  do
+    if Compiler
+    do -- Parse the theorem of inference rule
+      case p1 of
+        forall [boundVariables p2, premises p3, conclusion [p4]]
+        do
+          Bounds = p2
+          Premises = p3
+          p7 [p5,p6] = p4 where p7 in [equality, equivalence]
+          (From,To) = LeftToRight ? (p5,p6) : (p6,p5)
+          done
+      done
+    done
+
+  plus p1
+  do
+    case p1 of
+      equality [plus [p2, p3], plus [neg [p2], p4]]
+      do
+        replace t (equality [p3, neg [p4]])
+        done
+    done
+done

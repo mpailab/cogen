@@ -3,33 +3,27 @@
 -- External imports
 import           Control.Concurrent
 import           Control.Monad
+import           Control.Monad.State
 import           Data.Typeable
-import           Prelude            hiding (init)
+import           Prelude             hiding (init)
 import           System.Directory
 import           System.IO
 
 -- Internal imports
-import           Compiler
 import           Global
-import           Lsymbol
-import           Program.Parser
+import           LSymbol
 import           Program
-import           Rule
+import           Program.Parser
 
 -- | Test implementation
 test :: Integer -> IO Bool
 test num = case num of
   1 -> make $ do
-    lsyms_db <- load "database/lsymbols.db"
-    prog_str <- liftM readFile "database/programs/compiler.coral"
-    prog <- parse prog lsyms_db
-    writeFile "database/programs/qq.coral" (write prog lsyms_db)
-    return True
-
-  2 -> do
-    rulesFile <- readFile "database/rules.db"
-    let rules = read rulesFile :: [Rule]
-    forM_ rules compile
+    lsym_db <- load "database/lsymbols.db"
+    prog_str <- liftIO $ readFile "database/programs/before.coral"
+    liftIO $ print prog_str
+    let prog = parse prog_str lsym_db :: Program
+    liftIO $ writeFile "database/programs/after.coral" (write prog lsym_db)
     return True
 
 -- | Run test with number num

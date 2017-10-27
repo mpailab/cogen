@@ -22,7 +22,7 @@ In order to add new logical symbol need:
 module LSymbol
     (
       -- exports
-      LSymbol, LSymbols,
+      LSymbol, LSymbols, LTerm,
       initLSymbols,
       name, lsymbol, addLSymbol, isLSymbol
     )
@@ -38,6 +38,7 @@ import           System.IO
 
 -- Internal imports
 import           Database
+import           Term
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -61,6 +62,9 @@ data LSymbolInfo = Symbol
 
 -- | Type for database of logical symbols
 type LSymbols = (Array Int LSymbolInfo, M.Map String LSymbol)
+
+-- | Type of logical terms
+type LTerm = Term LSymbol
 
 ------------------------------------------------------------------------------------------
 -- Show instances
@@ -149,4 +153,4 @@ addLSymbol n s c d db = do
 isLSymbol :: String -> LSymbols -> Bool
 isLSymbol ('x':s) _ = all isDigit s
 isLSymbol ('i':s) _ = all isDigit s
-isLSymbol s db = isJust $ M.lookup s (snd db)
+isLSymbol s db      = isJust $ M.lookup s (snd db)

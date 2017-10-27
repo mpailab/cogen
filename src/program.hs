@@ -31,10 +31,12 @@ import           System.FilePath
 import           System.IO
 
 -- Internal imports
-import           Program.Parser
 import           Database
 import           LSymbol
-import           Program.PSymbol
+import           Program.Parser
+import           Program.PSymbol   (PTerm, parsePTerm)
+import qualified Program.PSymbol   as P
+import           Term
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -46,7 +48,7 @@ data Program
   --   and assigns them to a given program variable
   = Assign
     {
-      pattern   :: PTerm,  -- ^ assigned pattern
+      pattern_  :: PTerm,  -- ^ assigned pattern
       generate  :: PTerm,  -- ^ generator of list of terms
       condition :: PTerm,  -- ^ condition for iterating of terms
       jump      :: Program -- ^ jump to next program fragment
@@ -95,34 +97,37 @@ instance Parser Program where
 
 -- | Parse a program fragment corresponding to a given indent
 parseProgram :: Int -> ParserS Program
-parseProgram ind str db
-  =  parseAssign ind str db
-  ++ parseBranch ind str db
-  ++ parseSwitch ind str db
-  ++ parseAction ind str db
-  ++ parseEmpty  ind str db
+parseProgram = parseEmpty
+-- parseProgram ind str db
+--   =  parseAssign ind str db
+--   ++ parseBranch ind str db
+--   ++ parseSwitch ind str db
+--   ++ parseAction ind str db
+--   ++ parseEmpty  ind str db
 
 -- | Skip in a string a given number of indents
 skipIndent :: Int -> String -> String
-skipIndent 0 str = str
+skipIndent 0 str           = str
 skipIndent n (' ':' ':str) = skipIndent (n-1) str
 
 -- | Parse a given indent
 parseIndent :: Int -> String -> [String]
 parseIndent ind str
-  =  [(a:_) <- [skipIndent ind], not isSeparator a ]
-  ++ [(a:_) <- parseIndent ind $ skip " *\\n" str, not isSeparator a ]
+  =  [ x | x@(a:_) <- [skipIndent ind str], not (isSeparator a )]
+  ++ [ x | x@(a:_) <- parseIndent ind $ skip " *\\n" str, not (isSeparator a) ]
 
 -- | Parse a where statement of program fragment corresponding to a given indent
 parseWhere :: Int -> ParserS PTerm
 parseWhere ind s0 db
-  =  [ (x, s1) | (x,s1) <- parsePTerm (skip " +where +" s0) db, isBool t ]
+  =  [ (x, s1) | (x,s1) <- parsePTerm (skip " +where +" s0) db, P.isBool x ]
   ++ [ (x, s2) | s1 <- parseIndent ind s0,
                  (x,s2) <- parseWhere (ind+1) (skip "where" s1) db ]
   ++ [ (P.and x y, s3) | s1 <- parseIndent ind s0,
-                         (x,s2) <- parsePTerm s1 db, isBool t,
+                         (x,s2) <- parsePTerm s1 db, P.isBool x,
                          (y,s3) <- parseWhere ind s2 db ]
-  ++ [ ([], s0) | (a:_) <- parseIndent (ind-2) s0, not isSeparator a ]
+  ++ [ (x, s0) | s1 <- parseIndent ind s0,
+                 (x,s2) <- parsePTerm s1 db,
+                 (a:_) <- parseIndent (ind-2) s0, not (isSeparator a) ]
 
 -- | Parse an assigning instruction of program fragment corresponding to a given indent
 parseAssign :: Int -> ParserS Program
@@ -145,13 +150,13 @@ parseBranch :: Int -> ParserS Program
 parseBranch ind s0 db
   =  [ (Branch cond br jump, s5) |
        s1 <- parseIndent ind s0,
-       (cond,s2) <- parsePTerm (skip "if " s1) db, isBool cond,
+       (cond,s2) <- parsePTerm (skip "if " s1) db, P.isBool cond,
        s3 <- parseIndent ind s2,
        (br,s4) <- parseProgram (ind+1) (skip "do" s3) db,
        (jump,s5) <- parseProgram ind s4 db ]
 
 -- | Parse a case of switching instruction corresponding to a given indent
-parseSwitchCases :: Int -> ParserS [Program]
+parseSwitchCases :: Int -> ParserS [(PTerm, Program)]
 parseSwitchCases ind s0 db
   =  [ ((pat,prog):cs, s5) |
        s1 <- parseIndent ind s0,
@@ -159,8 +164,8 @@ parseSwitchCases ind s0 db
        s3 <- parseIndent ind s2,
        (prog,s4) <- parseProgram (ind+1) (skip "do" s3) db,
        (cs,s5) <- parseSwitchCases ind s4 db ]
-  ++ [ (lift [], s0) |
-       (a:_) <- parseIndent (ind-2) s0, not isSeparator a ]
+  ++ [ ([], s0) |
+       (a:_) <- parseIndent (ind-2) s0, not (isSeparator a) ]
 
 -- | Parse a switching instruction of program fragment corresponding to a given indent
 parseSwitch :: Int -> ParserS Program
@@ -176,7 +181,7 @@ parseAction :: Int -> ParserS Program
 parseAction ind s0 db
   =  [ (Action act cond jump, s4) |
        s1 <- parseIndent ind s0,
-       (act,s2) <- parsePTerm s1 db, isAction act,
+       (act,s2) <- parsePTerm s1 db, P.isAction act,
        (cond,s3) <- parseWhere (ind+1) s2 db,
        (jump,s4) <- parseProgram ind s3 db ]
 
@@ -199,18 +204,18 @@ writeWhere ind [] db = ""
 writeProgram :: Int -> Program -> LSymbols -> String
 
 -- | Write an assigning instruction of program fragment corresponding to a given indent
-writeProgram ind (Assign pat (List :> [val]) (And :> cs) jump) db =
+writeProgram ind (Assign pat (P.List :> [val]) (P.And :> cs) jump) db =
   writeIndent ind ++ write pat db ++ " = " ++ write val db  ++ "\n" ++
   writeIndent ind ++ "  where\n" ++
   writeWhere (ind+2) cs db ++
   writeProgram ind jump db
 
-writeProgram ind (Assign pat (List :> [val]) cond jump) db =
+writeProgram ind (Assign pat (P.List :> [val]) cond jump) db =
   writeIndent ind ++ write pat db  ++ " = " ++ write val db  ++
   " where " ++ write cond db  ++
   writeProgram ind jump db
 
-writeProgram ind (Assign pat gen (And :> cs) jump) db =
+writeProgram ind (Assign pat gen (P.And :> cs) jump) db =
   writeIndent ind ++ write pat db  ++ " <- " ++ write gen db  ++ "\n" ++
   writeIndent ind ++ "  where\n" ++
   writeWhere (ind+2) cs db ++
@@ -225,7 +230,7 @@ writeProgram ind (Assign pat gen cond jump) db =
 writeProgram ind (Branch cond br jump) db =
   writeIndent ind ++ "if " ++ write cond db  ++ "\n" ++
   writeIndent ind ++ "do\n" ++
-  writeProgram (ind+1) (br,db) ++
+  writeProgram (ind+1) br db ++
   writeProgram ind jump db
 
 -- | Write a switching instruction of program fragment corresponding to a given indent
@@ -238,12 +243,12 @@ writeProgram ind (Switch expr cs jump) db =
     writeSwitchCases ind ((pat,prog):cs) db =
       writeIndent ind ++ write pat db  ++ "\n" ++
       writeIndent ind ++ "do\n" ++
-      writeProgram (ind+1) (prog,db) ++
+      writeProgram (ind+1) prog db ++
       writeSwitchCases ind cs db
     writeSwitchCases ind [] db = ""
 
 -- | Write an acting instruction of program fragment corresponding to a given indent
-writeProgram ind (Action act (And :> cs) jump) db =
+writeProgram ind (Action act (P.And :> cs) jump) db =
   writeIndent ind ++ write act db  ++ "\n" ++
   writeIndent ind ++ "  where\n" ++
   writeWhere (ind+2) cs db ++
@@ -276,7 +281,7 @@ instance Database (String, LSymbols) Programs IO where
            content <- try (readFile file) :: IO (Either IOError FilePath)
            case content of
               Left _        -> return db
-              Right content -> return (addProgram s (read content) db)
+              Right content -> return (addProgram s (parse content lsym_db) db)
               where
                   s = lsymbol (read $ takeBaseName file) lsym_db
 
@@ -286,7 +291,7 @@ instance Database (String, LSymbols) Programs IO where
     mapM_ f (M.assocs db)
     where
       f :: (LSymbol, Program) -> IO ()
-      f (s, p) = writeFile (dir ++ name s lsym_db ++ ".db") (show p)
+      f (s, p) = writeFile (dir ++ name s lsym_db ++ ".db") (write p lsym_db)
 
 -- | Database instance for program
 instance Database (String, LSymbol, LSymbols) Program IO where
@@ -297,12 +302,12 @@ instance Database (String, LSymbol, LSymbols) Program IO where
     content <- try (readFile file) :: IO (Either IOError FilePath)
     case content of
       Left _        -> return Empty
-      Right content -> return (read content)
+      Right content -> return (parse content lsym_db)
 
   -- | Save a program of logical symbol to a database saved in given directory
   save p (dir, s, lsym_db) = do
     createDirectoryIfMissing True dir
-    writeFile (dir ++ "/" ++ name s lsym_db ++ ".db") (show p)
+    writeFile (dir ++ "/" ++ name s lsym_db ++ ".db") (write p lsym_db)
 
 ------------------------------------------------------------------------------------------
 -- Functions
