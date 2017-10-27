@@ -42,9 +42,13 @@ where
 -- External imports
 import           Data.Char
 import           Data.List
+import           Data.Map       ((!))
+import qualified Data.Map       as M
+import           Data.Maybe
 
 -- Internal imports
 import           LSymbol
+import           Program.Parser
 import           Term
 
 ------------------------------------------------------------------------------------------
@@ -62,6 +66,7 @@ data PSymbol = X Int                    -- ^ program variable
              | Or                       -- ^ logical or
              | Equal                    -- ^ equality of objects
              | NEqual                   -- ^ negation of equality of objects
+             | In                       -- ^ including for elements of set
              | Args                     -- ^ arguments of term
              | Replace                  -- !
              deriving (Eq, Ord)
@@ -80,15 +85,16 @@ instance Parser PSymbol where
 -- | Parse a program symbol
 parsePSymbol :: ParserS PSymbol
 parsePSymbol str db
-  =  [ (X (read x), "") | ('x':x,"") <- lex str, all isDigit x ]
+  =  [ (X (read x), "") | ('t':x,"") <- lex str, all isDigit x ]
   ++ [ (I (read x), "") | (x,"") <- lex str, all isDigit x ]
   ++ [ (B True, "") | ("True","") <- lex str ]
   ++ [ (B False, "") | ("False","") <- lex str ]
   ++ [ (S (lsymbol x db), "") | (x,"") <- lex str, isLSymbol x db ]
+  ++ [ (toKeyword x, "") | (x,"") <- lex str, isKeyword x ]
 
 -- | Show instance for program symbols
 instance Show PSymbol where
-  show (X i)     = 'x' : show i
+  show (X i)     = 't' : show i
   show (I i)     = show i
   show (B True)  = "True"
   show (B False) = "False"
@@ -97,25 +103,35 @@ instance Show PSymbol where
   show Or        = "or"
   show Equal     = "eq"
   show NEqual    = "ne"
+  show In        = "in"
   show Args      = "args"
   show Replace   = "replace"
 
 -- | Write a program symbol
 writePSymbol :: PSymbol -> LSymbols -> String
 writePSymbol (S s) db = name s db
-writePSymbol s _ = show s
+writePSymbol s _      = show s
 
 -- | Parser instance for program terms
 instance Parser PTerm where
   parse_ = parsePTerm
-  write  = writePTerm
+  write  = writePTerm False
 
 -- | List of keyword of program symbols
-keywords :: [String]
-keywords = map show [Not, And, Or, Equal, NEqual, Args, Replace]
+keywords :: [PSymbol]
+keywords = [Not, And, Or, Equal, NEqual, In, Args, Replace]
+
+keywordS :: [String]
+keywordS = map show keywords
+
+keywordM :: M.Map String PSymbol
+keywordM = M.fromList $ map (\x -> (show x, x)) keywords
+
+toKeyword :: String -> PSymbol
+toKeyword x = keywordM ! x
 
 isKeyword :: String -> Bool
-isKeyword x = elem x keywords
+isKeyword x = isJust $ M.lookup x keywordM
 
 isVariable :: String -> Bool
 isVariable ('p':x) = all isDigit x
@@ -128,12 +144,12 @@ isConstant x       = all isDigit x
 
 -- | Does a string correspond to a program symbol
 isPSymbol :: String -> LSymbols -> Bool
-isPSymbol x db = isKeyword x or isVariable x or isConstant x or isLSymbol x db
+isPSymbol x db = isKeyword x || isVariable x || isConstant x || isLSymbol x db
 
 parseBlock :: ParserS String
 parseBlock s0 db
   =  [ ("", s0) | s1 <- skip " *\n" s0 ]
-  ++ [ ("", s0) | (x,s1) <- lex s0, x == ")" or x == "]" or x == "," or isKeyword x ]
+  ++ [ ("", s0) | (x,s1) <- lex s0, x == ")" || x == "]" || x == "," || isKeyword x ]
 
 parseSequence :: String -> ParserS [PTerm]
 parseSequence sep s0 db
@@ -143,34 +159,34 @@ parseSequence sep s0 db
                     (x, s2) <- lex s1, x == sep,
                     (ts, s3) <- parseSequence sep (skip "\\s*" s2) db ]
 
-parsePSymbol :: ParserS PTerm
-parsePSymbol s0 db
+parseSymbol :: ParserS PTerm
+parseSymbol s0 db
   =  [ (T x, s1) | (x,s1) <- parsePSymbol s0 db,
                    ("",_) <- parseBlock s1 db ]
 
 parseVariable :: ParserS PTerm
 parseVariable so db
-  =  [ (x :> ts, s1) | (x@(X _),s1) <- parsePSymbol s0 db,
-       (ts,s2) <- parseList s1 db,
+  =  [ (x :> ts, s1) | (x@(X _),s1) <- parseSymbol s0 db,
+       (List :> ts,s2) <- parseList s1 db,
        ("",_) <- parseBlock s2 db ]
-  ++ [ (x :>> t, s1) | (x@(X _),s1) <- parsePSymbol s0 db,
+  ++ [ (x :>> t, s1) | (x@(X _),s1) <- parseSymbol s0 db,
        (t,s2) <- parsePTerm s1 db,
        ("",_) <- parseBlock s2 db ]
 
 parseLSymbol :: ParserS PTerm
 parseLSymbol so db
-  =  [ (x :> ts, s1) | (x@(S _),s1) <- parsePSymbol s0 db,
-                       (ts,s2) <- parseList s1 db,
+  =  [ (x :> ts, s1) | (x@(S _),s1) <- parseSymbol s0 db,
+                       (List :> ts,s2) <- parseList s1 db,
                        ("",_) <- parseBlock s2 db ]
-  ++ [ (x :>> t, s1) | (x@(S _),s1) <- parsePSymbol s0 db,
+  ++ [ (x :>> t, s1) | (x@(S _),s1) <- parseSymbol s0 db,
                        (t,s2) <- parsePTerm s1 db,
                        ("",_) <- parseBlock s2 db ]
 
-parseList :: ParserS [PTerm]
+parseList :: ParserS PTerm
 parseList s0 db
-  =  [ (ts, s3) | ("[", s1) <- lex s0,
-                  (ts, s2) <- parseSequence "," s1 db,
-                  ("]", s3) <- lex s2 ]
+  =  [ (List :> ts, s3) | ("[", s1) <- lex s0,
+                          (ts, s2) <- parseSequence "," s1 db,
+                          ("]", s3) <- lex s2 ]
 
 parseTuple :: ParserS PTerm
 parseTuple s0 db
@@ -186,37 +202,41 @@ parseNot s0 db
   = [ (Not :> [t], s2) | ("no", s1) <- lex s0,
                          (t,s2) <- parsePTerm s1 db ]
 
-parseAnd :: Bool -> Bool -> ParserS PTerm
+parseAnd :: ParserS PTerm
 parseAnd s0 db
   = [ (And :> ts, s1) | (ts, s1) <- parseSequence "and" s0 db ]
 
-parseOr :: Bool -> Bool -> ParserS PTerm
+parseOr :: ParserS PTerm
 parseOr s0 db
   = [ (Or :> ts, s1) | (ts, s1) <- parseSequence "or" s0 db ]
 
-parseEqual :: Bool -> Bool -> ParserS PTerm
+parseEqual :: ParserS PTerm
 parseEqual s0 db
   = [ (Equal :> ts, s1) | (ts@[_,_], s1) <- parseSequence "eq" s0 db ]
 
-parseNEqual :: Bool -> Bool -> ParserS PTerm
+parseNEqual :: ParserS PTerm
 parseNEqual s0 db
   = [ (NEqual :> ts, s1) | (ts@[_,_], s1) <- parseSequence "ne" s0 db ]
 
-parseArgs :: Bool -> Bool -> ParserS PTerm
+parseIn :: ParserS PTerm
+parseIn s0 db
+  = [ (In :> ts, s2) | (ts@[_,_], s1) <- parseSequence "in" s0 db ]
+
+parseArgs :: ParserS PTerm
 parseArgs s0 db
   = [ (Args :> [t], s2) | ("args", s1) <- lex s0,
                           (t,s2) <- parsePTerm s1 db ]
 
-parseReplace :: Bool -> Bool -> ParserS PTerm
+parseReplace :: ParserS PTerm
 parseReplace s0 db
   = [ (Replace :> [t1, t2], s3) | ("replace", s1) <- lex s0,
                                   (t1,s2) <- parsePTerm s1 db,
                                   (t2,s3) <- parsePTerm s2 db ]
 
 -- | Parse a program term
-parsePTerm :: Bool -> ParserS PTerm
-parsePTerm par s0 db
-  =  parsePSymbol s0 db
+parsePTerm :: ParserS PTerm
+parsePTerm s0 db
+  =  parseSymbol s0 db
   ++ parseVariable s0 db
   ++ parseLSymbol s0 db
   ++ parseList s0 db
@@ -231,7 +251,7 @@ parsePTerm par s0 db
 
 -- | Write sequence of program terms
 writeSequence :: [PTerm] -> LSymbols -> String
-writeSequence [t] db = writePTerm False t db
+writeSequence [t] db    = writePTerm False t db
 writeSequence (t:ts) db = writePTerm False t db ++ ", " ++ writeSequence ts db
 
 -- | Write prefix expression
@@ -247,7 +267,7 @@ writeInfx x ts db =
 
 -- | Write a program term
 writePTerm :: Bool -> PTerm -> LSymbols -> String
-writePTerm par t db = if par and snd s@(f t) then "(" ++ s ++ ")" else s
+writePTerm par t db = let s = f t in if par && snd s then "(" ++ s ++ ")" else s
   where
     f (T x)            = (writePSymbol x db, False)
     f (x@(X _) :> y)   = (writePSymbol x db ++ " [" ++ writeSequence y db ++ "]", True)
@@ -261,6 +281,7 @@ writePTerm par t db = if par and snd s@(f t) then "(" ++ s ++ ")" else s
     f (Or :> x)        = (writeInfx Or x db, True)
     f (Equal :> x)     = (writeInfx Equal x db, True)
     f (NEqual :> x)    = (writeInfx NEqual x db, True)
+    f (In :> x)        = (writeInfx In x db, True)
     f (Args :> x)      = (writePrefx Args x db, True)
     f (Replace :> x)   = (writePrefx Replace x db, True)
 
@@ -368,6 +389,21 @@ instance Eval Bool where
 instance Eval LSymbol where
   eval (S s) = s
 
+instance Eval ([Term a] -> Term a) where
+  eval Tuple [x] = x
+
+instance Eval ([Term a] -> (Term a, Term a)) where
+  eval Tuple [x1,x2] = (x1,x2)
+
+instance Eval ([Term a] -> (Term a, Term a, Term a)) where
+  eval Tuple [x1,x2,x3] = (x1,x2,x3)
+
+instance Eval ([Term a] -> (Term a, Term a, Term a, Term a)) where
+  eval Tuple [x1,x2,x3,x4] = (x1,x2,x3,x4)
+
+instance Eval ([Term a] -> (Term a, Term a, Term a, Term a, Term a)) where
+  eval Tuple [x1,x2,x3,x4,x5] = (x1,x2,x3,x4,x5)
+
 instance Eval (Bool -> Bool) where
   eval Not = Prelude.not
 
@@ -379,9 +415,6 @@ instance Eq a => Eval (a -> a -> Bool) where
   eval Equal  = (==)
   eval NEqual = (/=)
 
-instance Eval (Term a -> a) where
-  eval Header = Term.header
-
 instance Eval (Term a -> [Term a]) where
   eval Args = Term.args
 
@@ -390,5 +423,5 @@ instance Eval (Term a -> [Term a]) where
 
 -- | Does a program term correspond to an action
 isAction :: PTerm -> Bool
-isAction (Replacing :> _) = True
-isAction t                = False
+isAction (Replace :> _) = True
+isAction t              = False

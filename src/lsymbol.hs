@@ -146,7 +146,7 @@ addLSymbol n s c d db = do
   (a,b)
 
 -- | Does a string correspond to a logical symbol
-isLSymbol :: String -> Bool
-isLSymbol ('x':s) = all isDigit s
-isLSymbol ('i':s) = all isDigit s
-isLSymbol ('s':s) = all isDigit s
+isLSymbol :: String -> LSymbols -> Bool
+isLSymbol ('x':s) _ = all isDigit s
+isLSymbol ('i':s) _ = all isDigit s
+isLSymbol s db = isJust $ M.lookup s (snd db)

@@ -7,7 +7,7 @@ Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 -}
-module Program.PSymbol
+module Program.Parser
     (
       -- exports
       Parser, ParserS,
@@ -17,9 +17,10 @@ module Program.PSymbol
 where
 
 -- External imports
+import           Text.Regex.Posix
 
 -- Internal imports
-import LSymbol
+import           LSymbol
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -33,13 +34,6 @@ class Parser a where
 ------------------------------------------------------------------------------------------
 -- Function
 
-parseParen :: ParserS a -> ReadS a
-parseParen p s0 = do
-  ("(",s1) <- lex s0
-  (x,s2)   <- p s1
-  (")",s3) <- lex s2
-  return (x,s3)
-
 -- | Skip a pattern in a given string
 skip :: String -> String -> String
 skip pat str = case (str =~ pat :: (String, String, String)) of
@@ -47,10 +41,10 @@ skip pat str = case (str =~ pat :: (String, String, String)) of
 
 parseEither :: Parser a => String -> LSymbols -> Either String a
 parseEither str db =
-case [ x | (x,"") <- parse_ str db ] of
-  [x] -> Right x
-  []  -> Left "Parser: no parse"
-  _   -> Left "Parser: ambiguous parse"
+  case [ x | (x,"") <- parse_ str db ] of
+    [x] -> Right x
+    []  -> Left "Parser: no parse"
+    _   -> Left "Parser: ambiguous parse"
 
 parse :: Parser a => String -> LSymbols -> a
 parse str db = either error id (parseEither str db)

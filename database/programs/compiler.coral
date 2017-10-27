@@ -23,7 +23,7 @@ do
       do
         Bounds = p2
         Premises = p3
-        g [p5,p6] = p4 where g in [equality, equivalence]
+        p7 [p5,p6] = p4 where p7 in [equality, equivalence]
         (From,To) = LeftToRight ? (p5,p6) : (p6,p5)
         done
     done

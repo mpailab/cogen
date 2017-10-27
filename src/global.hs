@@ -15,6 +15,10 @@ Monad Global combines computations that can read, write or modify global informa
 module Global
     (
       -- exports
+      Global,
+      getLSymbols,
+      make,
+      load, save
     )
 where
 

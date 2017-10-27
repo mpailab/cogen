@@ -10,20 +10,20 @@ import           System.IO
 
 -- Internal imports
 import           Compiler
-import           LSymbol
+import           Global
+import           Lsymbol
+import           Program.Parser
+import           Program
 import           Rule
-import           Term
 
 -- | Test implementation
 test :: Integer -> IO Bool
 test num = case num of
-  1 -> do
-    let sym = Plus
-    let thrm = Forall :> [Var (X 1), Var (X 2), Var (X 3), Equivalence :> [Equal :> [Plus :> [Var (X 1), Var (X 2)], Plus :> [Neg :> [Var (X 1)], Var (X 3)]], Equal :> [Var (X 2), Neg :> [Var (X 3)]]]]
-    let h = Const LeftToRight
-    let rule = Rule sym thrm h [Level :> [Var (X 3)]] [Var (X 3)] [Var (X 3)]
-    writeFile "tmp/test1.txt" (show rule)
-    writeFile "tmp/draw.txt" (drawTerm thrm)
+  1 -> make $ do
+    lsyms_db <- load "database/lsymbols.db"
+    prog_str <- liftM readFile "database/programs/compiler.coral"
+    prog <- parse prog lsyms_db
+    writeFile "database/programs/qq.coral" (write prog lsyms_db)
     return True
 
   2 -> do
@@ -43,6 +43,6 @@ main :: IO ()
 main = do
   createDirectoryIfMissing False "tmp"
   putStrLn "Run tests:"
-  let test_num = 2 in mapM runTest [1..test_num]
+  let test_num = 1 in mapM runTest [1..test_num]
   putStrLn "Done"
   removeDirectoryRecursive "tmp"

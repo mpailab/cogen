@@ -31,6 +31,7 @@ import           System.FilePath
 import           System.IO
 
 -- Internal imports
+import           Program.Parser
 import           Database
 import           LSymbol
 import           Program.PSymbol
