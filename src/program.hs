@@ -67,6 +67,7 @@ data Program
   | Switch
     {
       expression :: PTerm,              -- ^ expression
+      condition :: PTerm,               -- ^ condition for switching
       cases      :: [(PTerm, Program)], -- ^ list of pairs (pattern, program fragment)
       jump       :: Program             -- ^ jump to next program fragment
     }
@@ -92,116 +93,99 @@ type Programs = M.Map LSymbol Program
 
 -- | Parser instance for Program
 instance Parser Program where
-  parse_ = parseProgram 0
+  parse_ str db = [ (Switch (P.cons Input) (P.cons True) cs Empty, "") |
+                    (cs,[]) <- parsePrograms (map indent (lines str) db ]
   write  = writeProgram 0
 
--- | Parse a program fragment corresponding to a given indent
-parseProgram :: Int -> ParserS Program
-parseProgram ind str db
-  =  parseAssign ind str db
-  ++ parseBranch ind str db
-  ++ parseSwitch ind str db
-  ++ parseAction ind str db
-  ++ parseEmpty  ind str db
+indent :: String -> (Int, String)
+indent ' ':x = let (i,y) = indent x in (i+1,y)
+indent x = (0, stripEnd x)
 
--- | Skip in a string a given number of indents
-skipIndent :: Int -> String -> [String]
-skipIndent 0 str           = [str]
-skipIndent n (' ':' ':str) = skipIndent (n-1) str
-skipIndent _ _             = []
+parseProgram str db = case (fold $ map indent (lines str)) of
+  (chunks, []) = [ (Switch (G Input) (map (`parseChunk` db) chunks) Empty, "") ]
+  _ = error "Parser error: Unable to split a program on fragments"
 
--- | Parse a given indent
-parseIndent :: Int -> String -> [String]
-parseIndent ind str
-  =  [ x | x@(a:_) <- skipIndent ind str, not (isSeparator a )]
-  ++ [ x | s <- skip " *\n" str, x@(a:_) <- parseIndent ind s, not (isSeparator a) ]
+-- | Parse a program fragment
+parseProgram :: ParserS Program (Int, String)
+parseProgram x@((i,a):(j,b):(k,c):s) db
+  | a == ""
+    = parseProgram (j,b):(k,c):s db
 
--- | Parse a where statement of program fragment corresponding to a given indent
-parseWhere :: Int -> ParserS PTerm
-parseWhere ind s0 db
-  =  [ (x, s2) | s1 <- skip " +where +" s0, (x,s2) <- parsePTerm s1 db, P.isBool x ]
-  ++ [ (x, s3) | s1 <- parseIndent ind s0, s2 <- skip "where" s1,
-                 (x,s3) <- parseWhere (ind+1) s2 db ]
-  ++ [ (P.and x y, s3) | s1 <- parseIndent ind s0,
-                         (x,s2) <- parsePTerm s1 db, P.isBool x,
-                         (y,s3) <- parseWhere ind s2 db ]
-  ++ [ (x, s0) | s1 <- parseIndent ind s0,
-                 (x,s2) <- parsePTerm s1 db,
-                 (a:_) <- parseIndent (ind-2) s0, not (isSeparator a) ]
+  | i < j-2 && not (b =~ "\b(do|done|if|case|=|<-)\b")
+    = parseProgram (i,a++" "++b):(k,c):s db
 
--- | Parse an assigning instruction of program fragment corresponding to a given indent
-parseAssign :: Int -> ParserS Program
-parseAssign ind s0 db
-  =  [ (Assign pat (P.list val) cond jump, s6) |
-       s1 <- parseIndent ind s0,
-       (pat,s2) <- parsePTerm s1 db,
-       s3 <- skip " += +" s2,
-       (val,s4) <- parsePTerm s3 db,
-       (cond,s5) <- parseWhere (ind+1) s4 db,
-       (jump,s6) <- parseProgram ind s5 db ]
-  ++ [ (Assign pat gen cond jump, s6) |
-       s1 <- parseIndent ind s0,
-       (pat,s2) <- parsePTerm s1 db,
-       s3 <- skip " +<- +" s2,
-       (gen,s4) <- parsePTerm s3 db,
-       (cond,s5) <- parseWhere (ind+1) s4 db,
-       (jump,s6) <- parseProgram ind s5 db ]
+  | i = j-2 && (j = k-2) && (b =~ "^where\b")
+    = parseProgram (i,a)(j,b++" and "++b):s db
 
--- | Parse a branching instruction of program fragment corresponding to a given indent
-parseBranch :: Int -> ParserS Program
-parseBranch ind s0 db
-  =  [ (Branch cond br jump, s7) |
-       s1 <- parseIndent ind s0,
-       s2 <- skip "if " s1,
-       (cond,s3) <- parsePTerm s2 db, P.isBool cond,
-       s4 <- parseIndent ind s3,
-       s5 <- skip "do[[:space:]]" s4,
-       (br,s6) <- parseProgram (ind+1) s5 db,
-       (jump,s7) <- parseProgram ind s6 db ]
+  | i = j-2 && (b =~ "^where\b")
+    = fold (i,a++" "++b):(k,c):s db
 
--- | Parse a case of switching instruction corresponding to a given indent
-parseSwitchCases :: Int -> ParserS [(PTerm, Program)]
-parseSwitchCases ind s0 db = [ ([(pat, Empty)], s1) |
-                               s1 <- parseIndent ind s0,
-                               (pat,s2) <- parsePTerm s1 db ]
-  -- =  [ ((pat,prog):cs, s6) |
-  --      s1 <- parseIndent ind s0,
-  --      (pat,s2) <- parsePTerm s1 db,
-  --      s3 <- parseIndent ind s2, s4 <- skip "do[[:space:]]" s3,
-  --      (prog,s5) <- parseProgram (ind+1) s4 db,
-  --      (cs,s6) <- parseSwitchCases ind s5 db ]
-  -- ++ [ ([], s0) |
-  --      (a:_) <- parseIndent (ind-2) s0, not (isSeparator a) ]
+  | not (a =~ "\b(do|done|where)\b") && (b /= "do")
+    = fold (i,a++" where True"):(j,b),(k,c):s db
 
--- | Parse a switching instruction of program fragment corresponding to a given indent
-parseSwitch :: Int -> ParserS Program
-parseSwitch ind s0 db
-  =  [ (Switch expr [] Empty, "") |
-       s1 <- parseIndent ind s0,
-       s2 <- skip "case " s1,
-       (expr,s3) <- parsePTerm s2 db,
-       s4 <- skip "[[:space:]]+of[[:space:]]" s3,
-       (cs,s5) <- parseSwitchCases (ind+1) s4 db ]
-  -- =  [ (Switch expr cs jump, s6) |
-  --      s1 <- parseIndent ind s0,
-  --      s2 <- skip "case " s1,
-  --      (expr,s3) <- parsePTerm s2 db,
-  --      s4 <- skip "\\s+of[[:space:]]" s3,
-  --      (cs,s5) <- parseSwitchCases (ind+1) s4 db,
-  --      (jump,s6) <- parseProgram ind s5 db ]
+  | otherwise
+    =  parseAssign x db
+    ++ parseBranch x db
+    ++ parseSwitch x db
+    ++ parseAction x db
+    ++ parseEmpty  x db
 
--- | Parse an acting instruction of program fragment corresponding to a given indent
-parseAction :: Int -> ParserS Program
-parseAction ind s0 db
-  =  [ (Action act cond jump, s4) |
-       s1 <- parseIndent ind s0,
-       (act,s2) <- parsePTerm s1 db, P.isAction act,
-       (cond,s3) <- parseWhere (ind+1) s2 db,
-       (jump,s4) <- parseProgram ind s3 db ]
+-- | Parse a list of program fragments
+parsePrograms :: ParserS [(PTerm, Program)] (Int, String)
+parsePrograms (i,a):(i,"do"):s db
+=  [ ((pat,prog):cs, t) |
+    (pat,"") <- parsePTerm a db
+    (prog,u) <- parseProgram s db
+    (cs,t) <- if u == [] || i == fst (head j) then parsePrograms u db else [([],u)] ]
+
+-- | Parse an assigning instruction
+parseAssign :: ParserS Program (Int, String)
+parseAssign (i,a):s db
+  =  [ (Assign pat (P.list val) cond jump, t) |
+       [_, s1, s2, s3] <- (a =~ "^(.*)\b += +\b(.*)\b +where +\b(.*)$"),
+       (pat,"") <- parsePTerm s1 db,
+       (val,"") <- parsePTerm s2 db,
+       (cond,"") <- parsePTerm s3 db,
+       (jump,t) <- parseProgram s db ]
+  ++ [ (Assign pat gen cond jump, t) |
+       [_, s1, s2, s3] <- (a =~ "^(.*)\b <- +\b(.*)\b +where +\b(.*)$"),
+       (pat,"") <- parsePTerm s1 db,
+       (gen,"") <- parsePTerm s2 db,
+       (cond,"") <- parsePTerm s3 db,
+       (jump,t) <- parseProgram s db ]
+
+-- | Parse a branching instruction
+parseBranch :: ParserS Program (Int, String)
+parseBranch (i,a):(i,"do"):s@((j,_):_) db
+  =  [ (Branch cond br jump, t) |
+       i == j-2,
+       [_, s1] <- (a =~ "^if +\b(.*)$"),
+       (cond,"") <- parsePTerm s1 db,
+       (br,u) <- parseProgram s db,
+       (jump,t) <- parseProgram u db ]
+
+-- | Parse a switching instruction
+parseSwitch :: ParserS Program (Int, String)
+parseSwitch (i,a):(j,b):s db
+  =  [ (Switch expr cond cs jump, t) |
+       [_, s1,s2] <- (a =~ "^case +\b(.*)\b +of +where +\b(.*)$")
+       (expr,"") <- parsePTerm s1 db
+       (cond,"") <- parsePTerm s2 db,
+       (cs,u) <- if i == j-2 then parsePrograms (j,b):s db else [([],(j,b):s)]
+       (jump,t) <- parseProgram u db ]
+
+-- | Parse an acting instruction
+parseAction :: ParserS Program (Int, String)
+parseAction (i,a):s db
+  =  [ (Action act cond jump, t) |
+       [_, s1,s2] <- (a =~ "^(.*)\b +where +\b(.*)$")
+       (act,"") <- parsePTerm s1 db, P.isAction act,
+       (cond,"") <- parsePTerm s2 db,
+       (jump,t) <- parseProgram s db ]
 
 -- | Parse an empty program fragment corresponding to a given indent
-parseEmpty :: Int -> ParserS Program
-parseEmpty ind s0 db
+parseEmpty :: ParserS Program (Int, String)
+parseEmpty (i,a):s db
   =  [ (Empty, s2) | s1 <- parseIndent ind s0, s2 <- skip "done" s1 ]
 
 writeIndent :: Int -> String
