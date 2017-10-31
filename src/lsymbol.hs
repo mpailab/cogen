@@ -58,7 +58,6 @@ data LSymbolInfo = Symbol
     categories_  :: [String], -- ^ list of categories
     description_ :: String    -- ^ description
   }
-  deriving (Read)
 
 -- | Type for database of logical symbols
 type LSymbols = (Array Int LSymbolInfo, M.Map String LSymbol)
@@ -78,7 +77,7 @@ instance Show LSymbol where
 -- Show instance for informational structure of logical symbols
 instance Show LSymbolInfo where
   show (Symbol i n s c d) =
-       "Symbol {\n"
+       "\nSymbol {\n"
     ++ "  id          = " ++ show i ++ ",\n"
     ++ "  name        = " ++ show n ++ ",\n"
     ++ "  synonyms    = " ++ show s ++ ",\n"
@@ -93,6 +92,22 @@ instance Read LSymbol where
   readsPrec p r =  [ (X (read x), "") | ('x':x,"") <- lex r, all isDigit x ]
                 ++ [ (I (read x), "") | ('i':x,"") <- lex r, all isDigit x ]
                 ++ [ (S (read x), "") | ('s':x,"") <- lex r, all isDigit x ]
+
+-- | Read instance for informational structure of logical symbols
+instance Read LSymbolInfo where
+  readsPrec p s0 =  [ (Symbol i n s c d, s12) |
+                      ("Symbol", s1) <- lex s0,
+                      ("{", s2) <- lex s1,
+                      (i, s3) <- f "id" p s2, (",", s4) <- lex s3,
+                      (n, s5) <- f "name" p s4, (",", s6) <- lex s5,
+                      (s, s7) <- f "synonyms" p s6, (",", s8) <- lex s7,
+                      (c, s9) <- f "categories" p s8, (",", s10) <- lex s9,
+                      (d, s11) <- f "description" p s10,
+                      ("}", s12) <- lex s11 ]
+    where
+      f pat p s0 = [ (x, s3) | (pat, s1) <- lex s0,
+                               ("=", s2) <- lex s1,
+                               (x, s3) <- readsPrec p s2 ]
 
 ------------------------------------------------------------------------------------------
 -- Database instances

@@ -36,13 +36,18 @@ class Parser a where
 -- Function
 
 -- | Skip a pattern in a given string
-skip :: String -> String -> String
-skip pat str = case (str =~ pat :: (String, String, String)) of
-  (_,_,r) -> r
+skip :: String -> String -> [String]
+skip pat str = if pat == "QQQ"
+  then
+    error ("Error:\n>>>" ++ str ++ "\n# " ++ show (str =~ "do[[:space:]]" :: (String, String, String)))
+  else
+    case (str =~ pat :: (String, String, String)) of
+      ("",_,r) -> [r]
+      _        -> []
 
 parseEither :: Parser a => String -> LSymbols -> Either String a
 parseEither str db =
-  case [ x | (x,"") <- parse_ str db ] of
+  case [ x | (x,s) <- parse_ str db, (s =~ "\\s*" :: Bool) ] of
     [x] -> Right x
     []  -> Left "Parser: no parse"
     _   -> Left "Parser: ambiguous parse"

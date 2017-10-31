@@ -48,5 +48,26 @@ Symbol {
   synonyms          = ["kontekst"],
   categories        = ["Rule.Filter", "Rule.Specifier"],
   description       = ""
+},
+Symbol {
+  id                = 8,
+  name              =  "boundVariables",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 9,
+  name              =  "premises",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 10,
+  name              =  "conclusion",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
 }
 ]
