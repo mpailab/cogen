@@ -24,7 +24,7 @@ Warning: Constructors of program symbols are private, do not exporte it.
 module Program.PSymbol
     (
       -- exports
-      PSymbol (List, And), PTerm,
+      PSymbol (B, List, And), PTerm,
       parsePTerm,
       var, cons,
       Program.PSymbol.list, list',
@@ -83,7 +83,8 @@ instance Parser PSymbol where
   write  = writePSymbol
 
 -- | Parse a program symbol
-parsePSymbol :: ParserS PSymbol
+parsePSymbol :: ParserS PSymbol Char
+parsePSymbol "" db = []
 parsePSymbol s0 db
   =  [ (X (read x), s1) | ('t':x,s1) <- lex s0, all isDigit x ]
   ++ [ (I (read x), s1) | (x,s1) <- lex s0, all isDigit x ]
@@ -152,125 +153,148 @@ isConstant x       = all isDigit x
 isPSymbol :: String -> LSymbols -> Bool
 isPSymbol x db = isKeyword x || isVariable x || isConstant x || isLSymbol x db
 
-parseBlock :: ParserS String
+parseBlock :: ParserS String Char
 parseBlock s0 db
-  =  [ ("", s0) | s1 <- skip " *\n" s0 ]
-  ++ [ ("", s0) | s1 <- skip " *" s0, Prelude.not (isSeparator $ head s1), (x,s2) <- lex s1, (x == ")" || x == "]" || x == "," || isKeyword x || x == "do" || x == "done" || x == "of" || x == "where") ]
+  =  [ ("", s0) | null s0 ]
+  ++ [ ("", s0) | s1 <- skip "[[:space:]]*" s0, null s1 || Prelude.not (isSeparator $ head s1), (x,s2) <- lex s1, (x == ")" || x == "]" || x == ",") ]
 
-parseSequence :: Bool -> String -> ParserS [PTerm]
+parseSequence :: Bool -> String -> ParserS [PTerm] Char
 parseSequence par sep s0 db
-  =  [ ([t], s2) | s1 <- skip "\\s*" s0,
+  =  [ ([t], s2) | s1 <- skip "[[:space:]]*" s0,
                    (t, s2) <- parsePTerm_ par s1 db,
                    (x, s3) <- lex s2, x /= sep ]
-  ++ [ (t:ts, s5) | s1 <- skip "\\s*" s0,
+  ++ [ (t:ts, s4) | s1 <- skip "[[:space:]]*" s0,
                     (t, s2) <- parsePTerm_ par s1 db,
                     (x, s3) <- lex s2, x == sep,
-                    s4 <- skip "\\s*" s3,
-                    (ts, s5) <- parseSequence par sep s4 db ]
+                    (ts, s4) <- parseSequence par sep s3 db ]
 
-parseSymbol :: ParserS PTerm
-parseSymbol s0 db
-  =  [ (T x, s1) | (x, s1) <- parsePSymbol s0 db,
+parseSymbol :: ParserS PTerm Char
+parseSymbol s0 db = if length q > 1 then error ("(1) " ++ s0) else q
+  where
+    q = [ (T x, s1) | (x, s1) <- parsePSymbol s0 db,
                    ("", _) <- parseBlock s1 db ]
 
-parseVariable :: Bool -> ParserS PTerm
+parseVariable :: Bool -> ParserS PTerm Char
 parseVariable par s0 db = if par
   then []
-  else [ (x :> ts, s1) | (T x@(X _), s1) <- parseSymbol s0 db,
-                         (List :> ts, s2) <- parseList s1 db,
-                         ("", _) <- parseBlock s2 db ]
-       ++ [ (x :>> t, s1) | (T x@(X _), s1) <- parseSymbol s0 db,
+  else if length q > 1 then error ("(2) " ++ s0) else q
+    where
+      q = ([ (f x t, s3) | (x@(X _), s1) <- parsePSymbol s0 db,
                          (t, s2) <- parsePTerm_ True s1 db,
-                         ("", _) <- parseBlock s2 db ]
+                         ("", s3) <- parseBlock s2 db ])
+      f x (List :> ts) = x :> ts
+      f x t = x :>> t
 
-parseLSymbol :: Bool -> ParserS PTerm
+parseLSymbol :: Bool -> ParserS PTerm Char
 parseLSymbol par s0 db = if par
   then []
-  else [ (x :> ts, s1) | (T x@(S _), s1) <- parseSymbol s0 db,
-                         (List :> ts, s2) <- parseList s1 db,
-                         ("", _) <- parseBlock s2 db ]
-       ++ [ (x :>> t, s1) | (T x@(S _), s1) <- parseSymbol s0 db,
+  else if length q > 1 then error ("(3) " ++ s0) else q
+    where
+      q = ([ (f x t, s3) | (x@(S _), s1) <- parsePSymbol s0 db,
                          (t, s2) <- parsePTerm_ True s1 db,
-                         ("", _) <- parseBlock s2 db ]
+                         ("", s3) <- parseBlock s2 db ])
+      f x (List :> ts) = x :> ts
+      f x t = x :>> t
 
-parseList :: ParserS PTerm
+parseList :: ParserS PTerm Char
 parseList s0 db
-  =  [ (List :> ts, s3) | ("[", s1) <- lex s0,
+  =  if length q > 1 then error ("(4) " ++ s0) else q
+    where
+      q = [ (List :> ts, s3) | ("[", s1) <- lex s0,
                           (ts, s2) <- parseSequence False "," s1 db,
                           ("]", s3) <- lex s2 ]
 
-parseTuple :: ParserS PTerm
+parseTuple :: ParserS PTerm Char
 parseTuple s0 db
-  =  [ (t, s3) | ("(", s1) <- lex s0,
+  =  if length q > 1 then error ("(5) " ++ s0) else q
+    where
+      q = ([ (t, s3) | ("(", s1) <- lex s0,
                  ([t], s2) <- parseSequence False "," s1 db,
-                 (")", s3) <- lex s2 ]
-  ++ [ (Tuple :> ts, s3) | ("(", s1) <- lex s0,
+                 (")", s3) <- lex s2 ] ++ [ (Tuple :> ts, s3) | ("(", s1) <- lex s0,
                            (ts, s2) <- parseSequence False "," s1 db,
-                           (")", s3) <- lex s2 ]
+                           (")", s3) <- lex s2 ])
 
-parseNot :: Bool -> ParserS PTerm
+parseNot :: Bool -> ParserS PTerm Char
 parseNot par s0 db = if par
   then []
-  else [ (Not :> [t], s2) | ("no", s1) <- lex s0,
+  else if length q > 1 then error ("(6) " ++ s0) else q
+    where
+      q = [ (Not :> [t], s2) | ("no", s1) <- lex s0,
                             (t, s2) <- parsePTerm_ True s1 db ]
 
-parseAnd :: Bool -> ParserS PTerm
+parseAnd :: Bool -> ParserS PTerm Char
 parseAnd par s0 db = if par
   then []
-  else [ (And :> ts, s1) | (ts, s1) <- parseSequence True "and" s0 db ]
+  else if length q > 1 then error ("(7) " ++ s0) else q
+    where
+      q = [ (And :> ts, s1) | (ts@(_:_:_), s1) <- parseSequence True "and" s0 db ]
 
-parseOr :: Bool -> ParserS PTerm
+parseOr :: Bool -> ParserS PTerm Char
 parseOr par s0 db = if par
   then []
-  else [ (Or :> ts, s1) | (ts, s1) <- parseSequence True "or" s0 db ]
+  else if length q > 1 then error ("(8) " ++ s0) else q
+    where
+      q = [ (Or :> ts, s1) | (ts@(_:_:_), s1) <- parseSequence True "or" s0 db ]
 
-parseEqual :: Bool -> ParserS PTerm
+parseEqual :: Bool -> ParserS PTerm Char
 parseEqual par s0 db = if par
   then []
-  else [ (Equal :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "eq" s0 db ]
+  else if length q > 1 then error ("(9) " ++ s0) else q
+    where
+      q = [ (Equal :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "eq" s0 db ]
 
-parseNEqual :: Bool -> ParserS PTerm
+parseNEqual :: Bool -> ParserS PTerm Char
 parseNEqual par s0 db = if par
   then []
-  else [ (NEqual :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "ne" s0 db ]
+  else if length q > 1 then error ("(10) " ++ s0) else q
+    where
+      q = [ (NEqual :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "ne" s0 db ]
 
-parseIn :: Bool -> ParserS PTerm
+parseIn :: Bool -> ParserS PTerm Char
 parseIn par s0 db = if par
   then []
-  else [ (In :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "in" s0 db ]
+  else if length q > 1 then error ("(11) " ++ s0) else q
+    where
+      q = [ (In :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "in" s0 db ]
 
-parseArgs :: Bool -> ParserS PTerm
+parseArgs :: Bool -> ParserS PTerm Char
 parseArgs par s0 db = if par
   then []
-  else [ (Args :> [t], s2) | ("args", s1) <- lex s0,
+  else if length q > 1 then error ("(12) " ++ s0) else q
+    where
+      q = [ (Args :> [t], s2) | ("args", s1) <- lex s0,
                              (t, s2) <- parsePTerm_ True s1 db ]
 
-parseReplace :: Bool -> ParserS PTerm
+parseReplace :: Bool -> ParserS PTerm Char
 parseReplace par s0 db = if par
   then []
-  else [ (Replace :> [t1, t2], s3) | ("replace", s1) <- lex s0,
+  else if length q > 1 then error ("(13) " ++ s0) else q
+    where
+      q = [ (Replace :> [t1, t2], s3) | ("replace", s1) <- lex s0,
                                      (t1, s2) <- parsePTerm_ True s1 db,
                                      (t2, s3) <- parsePTerm_ True s2 db ]
 
 -- | Parse a program term
-parsePTerm_ :: Bool -> ParserS PTerm
-parsePTerm_ par s0 db
-  =  parseSymbol s0 db
-  -- ++ parseVariable par s0 db
-  -- ++ parseLSymbol par s0 db
-  -- ++ parseList s0 db
-  -- ++ parseTuple s0 db
-  -- ++ parseNot par s0 db
-  -- ++ parseAnd par s0 db
-  -- ++ parseOr par s0 db
-  -- ++ parseEqual par s0 db
-  -- ++ parseNEqual par s0 db
-  -- ++ parseIn par s0 db
-  -- ++ parseArgs par s0 db
-  -- ++ parseReplace par s0 db
+parsePTerm_ :: Bool -> ParserS PTerm Char
+parsePTerm_ par "" db = []
+parsePTerm_ par s0 db = if length q1 + length q2 + length q3 + length q4 + length q5 + length q6 + length q7 + length q8 + length q9 + length q10 + length q11 + length q12 + length q13 > 1 then error (show s0 ++ "\n1: " ++ show (length q1) ++ "\n2: " ++ show (length q2) ++ "\n3: " ++ show (length q3) ++ "\n4: " ++ show (length q4) ++ "\n5: " ++ show (length q5) ++ "\n6: " ++ show (length q6) ++ "\n7: " ++ show (length q7) ++ "\n8: " ++ show (length q8) ++ "\n9: " ++ show (length q9) ++ "\n10: " ++ show (length q10) ++ "\n11: " ++ show (length q11) ++ "\n12: " ++ show (length q12) ++ "\n13: " ++ show (length q13)) else q1 ++ q2 ++ q3 ++ q4 ++ q5 ++ q6 ++ q7 ++ q8 ++ q9 ++ q10 ++ q11 ++ q12 ++ q13
+  where
+    q1 = parseSymbol s0 db
+    q2 = parseVariable par s0 db
+    q3 = parseLSymbol par s0 db
+    q4 = parseList s0 db
+    q5 = parseTuple s0 db
+    q6 = parseNot par s0 db
+    q7 = parseAnd par s0 db
+    q8 = parseOr par s0 db
+    q9 = parseEqual par s0 db
+    q10 = parseNEqual par s0 db
+    q11 = parseIn par s0 db
+    q12 = parseArgs par s0 db
+    q13 = parseReplace par s0 db
 
 -- | Parse a program term
-parsePTerm :: ParserS PTerm
+parsePTerm :: ParserS PTerm Char
 parsePTerm = parsePTerm_ False
 
 -- | Write sequence of program terms

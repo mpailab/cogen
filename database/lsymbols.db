@@ -15,7 +15,7 @@ Symbol {
 },
 Symbol {
   id                = 3,
-  name              = "equal",
+  name              = "equality",
   synonyms          = ["=="],
   categories        = ["Term"],
   description       = "Logical symbol for the equality"
@@ -23,7 +23,7 @@ Symbol {
 Symbol {
   id                = 4,
   name              = "forall",
-  synonyms          = [""],
+  synonyms          = [],
   categories        = ["Term"],
   description       = "Logical symbol for the universal quantifier"
 },
@@ -44,28 +44,42 @@ Symbol {
 },
 Symbol {
   id                = 7,
-  name              =  "context",
+  name              = "context",
   synonyms          = ["kontekst"],
   categories        = ["Rule.Filter", "Rule.Specifier"],
   description       = ""
 },
 Symbol {
   id                = 8,
-  name              =  "boundVariables",
+  name              = "boundVariables",
   synonyms          = [],
   categories        = [],
   description       = ""
 },
 Symbol {
   id                = 9,
-  name              =  "premises",
+  name              = "premises",
   synonyms          = [],
   categories        = [],
   description       = ""
 },
 Symbol {
   id                = 10,
-  name              =  "conclusion",
+  name              = "conclusion",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 11,
+  name              = "theorem",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 12,
+  name              = "equivalence",
   synonyms          = [],
   categories        = [],
   description       = ""

@@ -26,10 +26,10 @@ import           LSymbol
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
 
-type ParserS a = String -> LSymbols -> [(a, String)]
+type ParserS a b = [b] -> LSymbols -> [(a, [b])]
 
 class Parser a where
-  parse_ :: ParserS a
+  parse_ :: ParserS a Char
   write  :: a -> LSymbols -> String
 
 ------------------------------------------------------------------------------------------
@@ -47,7 +47,7 @@ skip pat str = if pat == "QQQ"
 
 parseEither :: Parser a => String -> LSymbols -> Either String a
 parseEither str db =
-  case [ x | (x,s) <- parse_ str db, (s =~ "\\s*" :: Bool) ] of
+  case [ x | (x,"") <- parse_ str db ] of
     [x] -> Right x
     []  -> Left "Parser: no parse"
     _   -> Left "Parser: ambiguous parse"
