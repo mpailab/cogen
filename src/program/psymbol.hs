@@ -118,27 +118,36 @@ instance Parser PTerm where
   parse_ = parsePTerm
   write  = writePTerm False
 
+-- | List of keyword of program symbols
+keywords :: [PSymbol]
+keywords = [Not, And, Or, Equal, NEqual, In, Args, Replace]
+
 keywordsBool :: [PSymbol]
 keywordsBool = [Not, And, Or, Equal, NEqual]
 
 keywordsAction :: [PSymbol]
 keywordsAction = [Replace]
 
--- | List of keyword of program symbols
-keywords :: [PSymbol]
-keywords = [Not, And, Or, Equal, NEqual, In, Args, Replace]
+keywordsInfix :: [PSymbol]
+keywordsInfix = [And, Or, Equal, NEqual, In]
 
-keywordS :: [String]
-keywordS = map show keywords
+keywordsPrefix :: [PSymbol]
+keywordsPrefix = [Not, Args, Replace]
 
-keywordM :: M.Map String PSymbol
-keywordM = M.fromList $ map (\x -> (show x, x)) keywords
+keywordsM :: M.Map String PSymbol
+keywordsM = M.fromList $ map (\x -> (show x, x)) keywords
+
+keywordsInfixM :: M.Map String PSymbol
+keywordsInfixM = M.fromList $ map (\x -> (show x, x)) keywordsInfix
 
 toKeyword :: String -> PSymbol
-toKeyword x = keywordM ! x
+toKeyword x = keywordsM ! x
+
+isInfixKeyword :: String -> Bool
+isInfixKeyword x = isJust $ M.lookup x keywordsInfixM
 
 isKeyword :: String -> Bool
-isKeyword x = isJust $ M.lookup x keywordM
+isKeyword x = isJust $ M.lookup x keywordsM
 
 isVariable :: String -> Bool
 isVariable ('t':x) = all isDigit x
@@ -155,8 +164,10 @@ isPSymbol x db = isKeyword x || isVariable x || isConstant x || isLSymbol x db
 
 parseBlock :: ParserS String Char
 parseBlock s0 db
-  =  [ ("", s0) | null s0 ]
-  ++ [ ("", s0) | s1 <- skip "[[:space:]]*" s0, null s1 || Prelude.not (isSeparator $ head s1), (x,s2) <- lex s1, (x == ")" || x == "]" || x == ",") ]
+  =  [ ("", s0) | s1 <- skip "[[:space:]]*" s0, null s1 ]
+  ++ [ ("", s0) | s1@(_:_) <- skip "[[:space:]]*" s0,
+                  (x,s2) <- lex s1,
+                  (x == ")" || x == "]" || x == "," || isInfixKeyword x) ]
 
 parseSequence :: Bool -> String -> ParserS [PTerm] Char
 parseSequence par sep s0 db
