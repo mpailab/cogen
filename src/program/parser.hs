@@ -13,7 +13,7 @@ module Program.Parser
       Parser, ParserS,
       parse, parse_,
       write,
-      skip
+      (+++), skip
     )
 where
 
@@ -34,6 +34,10 @@ class Parser a where
 
 ------------------------------------------------------------------------------------------
 -- Function
+
+infixr 5 +++
+(+++) :: ParserS a b -> ParserS a b -> ParserS a b
+f +++ g = (\x db -> let s = g x db in if null s then f x db else s)
 
 -- | Skip a pattern in a given string
 skip :: String -> String -> [String]

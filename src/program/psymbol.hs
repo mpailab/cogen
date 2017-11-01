@@ -82,16 +82,26 @@ instance Parser PSymbol where
   parse_ = parsePSymbol
   write  = writePSymbol
 
--- | Parse a program symbol
-parsePSymbol :: ParserS PSymbol Char
-parsePSymbol "" db = []
-parsePSymbol s0 db
-  =  [ (X (read x), s1) | ('t':x,s1) <- lex s0, all isDigit x ]
-  ++ [ (I (read x), s1) | (x,s1) <- lex s0, all isDigit x ]
+parseVar :: ParserS PSymbol Char
+parseVar s0 db = [ (X (read x), s1) | ('t':x,s1) <- lex s0, all isDigit x ]
+
+parseInt :: ParserS PSymbol Char
+parseInt s0 db = [ (I (read x), s1) | (x@(_:_),s1) <- lex s0, all isDigit x ]
+
+parseConstPSymbol :: ParserS PSymbol Char
+parseConstPSymbol s0 db
+  =  [ (I (read x), s1) | (x@(_:_),s1) <- lex s0, all isDigit x ]
   ++ [ (B True, s1) | ("True",s1) <- lex s0 ]
   ++ [ (B False, s1) | ("False",s1) <- lex s0 ]
-  ++ [ (S (lsymbol x db), s1) | (x,s1) <- lex s0, isLSymbol x db ]
-  ++ [ (toKeyword x, s1) | (x,s1) <- lex s0, isKeyword x ]
+
+parseVarPSymbol :: ParserS PSymbol Char
+parseVarPSymbol s0 db
+  =  [ (X (read x), s1) | ('t':x,s1) <- lex s0, all isDigit x ]
+  ++ [ (S (lsymbol x db), s1) | (x@(_:_),s1) <- lex s0, isLSymbol x db ]
+
+-- | Parse a program symbol
+parsePSymbol :: ParserS PSymbol Char
+parsePSymbol = parseConstPSymbol +++ parseVarPSymbol
 
 -- | Show instance for program symbols
 instance Show PSymbol where
@@ -180,21 +190,17 @@ parseSequence par sep s0 db
                     (ts, s4) <- parseSequence par sep s3 db ]
 
 parseSymbol :: ParserS PTerm Char
-parseSymbol s0 db = if length q > 1 then error ("(1) " ++ s0) else q
-  where
-    q = [ (T x, s1) | (x, s1) <- parsePSymbol s0 db,
-                   ("", _) <- parseBlock s1 db ]
+parseSymbol s0 db
+  = [ (T x, s1) | (x, s1) <- parsePSymbol s0 db, ("", _) <- parseBlock s1 db ]
 
 parseVariable :: Bool -> ParserS PTerm Char
-parseVariable par s0 db = if par
-  then []
-  else if length q > 1 then error ("(2) " ++ s0) else q
-    where
-      q = ([ (f x t, s3) | (x@(X _), s1) <- parsePSymbol s0 db,
-                         (t, s2) <- parsePTerm_ True s1 db,
-                         ("", s3) <- parseBlock s2 db ])
-      f x (List :> ts) = x :> ts
-      f x t = x :>> t
+parseVariable par s0 db
+  = ([ (f x t, s3) | (x@(X _), s1) <- parsePSymbol s0 db,
+                     (t, s2) <- parsePTerm_ True s1 db,
+                     ("", s3) <- parseBlock s2 db ])
+  where
+    f x (List :> ts) = x :> ts
+    f x t            = x :>> t
 
 parseLSymbol :: Bool -> ParserS PTerm Char
 parseLSymbol par s0 db = if par
@@ -205,7 +211,7 @@ parseLSymbol par s0 db = if par
                          (t, s2) <- parsePTerm_ True s1 db,
                          ("", s3) <- parseBlock s2 db ])
       f x (List :> ts) = x :> ts
-      f x t = x :>> t
+      f x t            = x :>> t
 
 parseList :: ParserS PTerm Char
 parseList s0 db
