@@ -95,40 +95,66 @@ type Programs = M.Map LSymbol Program
 
 -- | Parser instance for Program
 instance Parser Program where
-  parse_ str db = [ (Switch (P.var 0) (P.cons True) cs Empty, "") |
-                    (cs,[]) <- parsePrograms (map f (lines str)) db ]
-    where
-      f (' ':x) = let (i,y) = f x in (i+1,y)
-      f x       = (0, T.unpack $ T.stripEnd $ T.pack x)
-
   write  = writeProgram 0
+
+  parse_ x db = case f (map g (lines x)) db of
+    [(prog,[])] -> [(prog,"")]
+    [] -> error ("\n" ++ (show . addWhere . pullWhere . foldWhere . pullChunk . skipEmpty) (map g (lines x)) ++ "\n")
+    y -> error (h y)
+    where
+      h = foldr (\(p,z) u -> "\nprog: " ++ write p db ++ "\ntail: " ++ show z ++ u) "\n"
+
+      f :: ParserS Program (Int, String)
+      f = parseProgram . addWhere . pullWhere . foldWhere . pullChunk . skipEmpty
+
+      g :: String -> (Int, String)
+      g (' ':' ':x) = let (i,y) = g x in (i+1,y)
+      g x           = (0, T.unpack $ T.strip $ T.pack x)
+
+      skipEmpty :: [(Int, String)] -> [(Int, String)]
+      skipEmpty ((_,""):s) = skipEmpty s
+      skipEmpty (x:s) = (x:(skipEmpty s))
+      skipEmpty [] = []
+
+      pullChunk :: [(Int, String)] -> [(Int, String)]
+      pullChunk ((i,a):y@((j,b):s))
+        | i < j-1 = pullChunk ((i,a++" "++b):s)
+        | otherwise = ((i,a):(pullChunk y))
+      pullChunk (x:s) = (x:(pullChunk s))
+      pullChunk [] = []
+
+      foldWhere :: [(Int, String)] -> [(Int, String)]
+      foldWhere ((i,a):y@((j,b):(k,c):(l,d):s))
+        | i == j-1 && j == k-1 && k == l && b =~ "where"
+          = foldWhere ((i,a):(j,b):(k,c++" and "++d):s)
+        | otherwise = ((i,a):(foldWhere y))
+      foldWhere (x:s) = (x:(foldWhere s))
+      foldWhere [] = []
+
+      pullWhere :: [(Int, String)] -> [(Int, String)]
+      pullWhere ((i,a):y@((j,b):(k,c):s))
+        | i == j-1 && j == k-1 && b == "where"
+          = pullWhere ((i,a ++ " where " ++ c):s)
+        | otherwise = ((i,a):(pullWhere y))
+      pullWhere (x:s) = (x:(pullWhere s))
+      pullWhere [] = []
+
+      addWhere :: [(Int, String)] -> [(Int, String)]
+      addWhere ((i,a):y@((j,b):s))
+        | a /= "do" && a /= "done" && not (elem "where" (words a)) && b /= "do"
+          = addWhere ((i,a ++ " where True"):y)
+        | otherwise = ((i,a):(addWhere y))
+      addWhere (x:s) = (x:(addWhere s))
+      addWhere [] = []
 
 -- | Parse a program fragment
 parseProgram :: ParserS Program (Int, String)
-parseProgram x@((i,a):(j,b):(k,c):s) db
-  | null a
-    = parseProgram ((j,b):(k,c):s) db
-
-  | i < j-2 && not (b =~ "[[:space:]](do|done|if|case|=|<-)[[:space:]]")
-    = parseProgram ((i,a++" "++b):(k,c):s) db
-
-  | i == j-2 && (j == k-2) && (b =~ "^where[[:space:]]")
-    = parseProgram ((i,a):(j,b++" and "++b):s) db
-
-  | i == j-2 && (b =~ "^where[[:space:]]")
-    = parseProgram ((i,a++" "++b):(k,c):s) db
-
-  | not (a =~ "[[:space:]](do|done|where)[[:space:]]") && (b /= "do")
-    = parseProgram ((i,a++" where True"):(j,b):(k,c):s) db
-
-  | otherwise
-    =  parseAssign x db
-    ++ parseBranch x db
-    ++ parseSwitch x db
-    ++ parseAction x db
-    ++ parseEmpty  x db
-
-parseProgram x db = parseEmpty x db
+parseProgram x db
+  =  parseAssign x db
+  ++ parseBranch x db
+  ++ parseSwitch x db
+  ++ parseAction x db
+  ++ parseEmpty  x db
 
 -- | Parse a list of program fragments
 parsePrograms :: ParserS [(PTerm, Program)] (Int, String)
@@ -159,7 +185,7 @@ parseAssign _ db = []
 -- | Parse a branching instruction
 parseBranch :: ParserS Program (Int, String)
 parseBranch ((i,a):(j,"do"):s@((k,_):_)) db
-  =  [ (Branch cond br jump, t) | i == j && j == k-2,
+  =  [ (Branch cond br jump, t) | i == j && j == k-1,
        ["", s1] <- [cut a ["if"]],
        (cond,"") <- parsePTerm s1 db,
        (br,u) <- parseProgram s db,
@@ -173,7 +199,7 @@ parseSwitch x@((i,a):(j,b):s) db
        ["", s1, "", s2] <- [cut a ["case", "of", "where"]],
        (expr,"") <- parsePTerm s1 db,
        (cond,"") <- parsePTerm s2 db,
-       (cs,u) <- if i == j-2 then parsePrograms ((j,b):s) db else [([],(j,b):s)],
+       (cs,u) <- if i == j-1 then parsePrograms ((j,b):s) db else [([],(j,b):s)],
        (jump,t) <- parseProgram u db ]
 parseSwitch _ db = []
 
@@ -193,7 +219,7 @@ parseEmpty ((i,"done"):s) db = [ (Empty, s) ]
 parseEmpty _ db              = []
 
 cut :: String -> [String] -> [String]
-cut s0 (p:ps) = let (s1,_,s2) = (s0 =~ ("[[:space:]]*"++p++"[[:space:]]*") :: (String,String,String))
+cut s0 (p:ps) = let (s1,_,s2) = (s0 =~ (" *"++p++" *") :: (String,String,String))
                 in s1:(cut s2 ps)
 cut s0 [] = [s0]
 
@@ -221,7 +247,7 @@ writeProgram ind (Assign pat (P.List :> [val]) (P.And :> conds) jump) db =
 
 writeProgram ind (Assign pat (P.List :> [val]) cond jump) db =
   writeIndent ind ++ write pat db  ++ " = " ++ write val db  ++
-  " where " ++ write cond db  ++
+  " where " ++ write cond db  ++ "\n" ++
   writeProgram ind jump db
 
 writeProgram ind (Assign pat gen (T (P.B True)) jump) db =
@@ -236,7 +262,7 @@ writeProgram ind (Assign pat gen (P.And :> conds) jump) db =
 
 writeProgram ind (Assign pat gen cond jump) db =
   writeIndent ind ++ write pat db  ++ " <- " ++ write gen db  ++
-  " where " ++ write cond db  ++
+  " where " ++ write cond db  ++ "\n" ++
   writeProgram ind jump db
 
 -- | Write a branching instruction of program fragment corresponding to a given indent
@@ -261,7 +287,7 @@ writeProgram ind (Switch expr (P.And :> conds) cs jump) db =
 
 writeProgram ind (Switch expr cond cs jump) db =
   writeIndent ind ++ "case " ++ write expr db  ++ " of\n" ++
-  " where " ++ write cond db  ++
+  " where " ++ write cond db  ++ "\n" ++
   writeSwitchCases (ind+1) cs db ++
   writeProgram ind jump db
 
@@ -278,7 +304,7 @@ writeProgram ind (Action act (P.And :> cs) jump) db =
 
 writeProgram ind (Action act cond jump) db =
   writeIndent ind ++ write act db  ++
-  " where " ++ write cond db  ++
+  " where " ++ write cond db  ++ "\n" ++
   writeProgram ind jump db
 
 -- | Write an empty program fragment corresponding to a given indent

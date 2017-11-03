@@ -83,25 +83,25 @@ instance Parser PSymbol where
   write  = writePSymbol
 
 parseVar :: ParserS PSymbol Char
-parseVar s0 db = [ (X (read x), s1) | ('t':x,s1) <- lex s0, all isDigit x ]
+parseVar = "parse a program variable" >>> \s0 db ->
+  [ (X (read x), s1) | ('t':x,s1) <- lex s0, all isDigit x ]
 
 parseInt :: ParserS PSymbol Char
-parseInt s0 db = [ (I (read x), s1) | (x@(_:_),s1) <- lex s0, all isDigit x ]
+parseInt = "parse an integer constant" >>> \s0 db ->
+  [ (I (read x), s1) | (x@(_:_),s1) <- lex s0, all isDigit x ]
 
-parseConstPSymbol :: ParserS PSymbol Char
-parseConstPSymbol s0 db
-  =  [ (I (read x), s1) | (x@(_:_),s1) <- lex s0, all isDigit x ]
-  ++ [ (B True, s1) | ("True",s1) <- lex s0 ]
-  ++ [ (B False, s1) | ("False",s1) <- lex s0 ]
+parseBool :: ParserS PSymbol Char
+parseBool = "parse a bool constant" >>> \s0 db ->
+  [ (B True, s1) | ("True",s1) <- lex s0 ] ++
+  [ (B False, s1) | ("False",s1) <- lex s0 ]
 
-parseVarPSymbol :: ParserS PSymbol Char
-parseVarPSymbol s0 db
-  =  [ (X (read x), s1) | ('t':x,s1) <- lex s0, all isDigit x ]
-  ++ [ (S (lsymbol x db), s1) | (x@(_:_),s1) <- lex s0, isLSymbol x db ]
+parseLSymbol :: ParserS PSymbol Char
+parseLSymbol = "parse a logical symbol" >>> \s0 db ->
+  [ (S (lsymbol x db), s1) | (x@(_:_),s1) <- lex s0, isLSymbol x db ]
 
 -- | Parse a program symbol
 parsePSymbol :: ParserS PSymbol Char
-parsePSymbol = parseConstPSymbol +++ parseVarPSymbol
+parsePSymbol = parseVar +>+ parseInt +>+ parseBool +>+ parseLSymbol
 
 -- | Show instance for program symbols
 instance Show PSymbol where
@@ -138,181 +138,91 @@ keywordsBool = [Not, And, Or, Equal, NEqual]
 keywordsAction :: [PSymbol]
 keywordsAction = [Replace]
 
-keywordsInfix :: [PSymbol]
-keywordsInfix = [And, Or, Equal, NEqual, In]
-
-keywordsPrefix :: [PSymbol]
-keywordsPrefix = [Not, Args, Replace]
-
-keywordsM :: M.Map String PSymbol
-keywordsM = M.fromList $ map (\x -> (show x, x)) keywords
-
-keywordsInfixM :: M.Map String PSymbol
-keywordsInfixM = M.fromList $ map (\x -> (show x, x)) keywordsInfix
-
-toKeyword :: String -> PSymbol
-toKeyword x = keywordsM ! x
-
-isInfixKeyword :: String -> Bool
-isInfixKeyword x = isJust $ M.lookup x keywordsInfixM
-
-isKeyword :: String -> Bool
-isKeyword x = isJust $ M.lookup x keywordsM
-
-isVariable :: String -> Bool
-isVariable ('t':x) = all isDigit x
-isVariable ('_':x) = all isAlphaNum x
-
-isConstant :: String -> Bool
-isConstant "True"  = True
-isConstant "False" = True
-isConstant x       = all isDigit x
-
--- | Does a string correspond to a program symbol
-isPSymbol :: String -> LSymbols -> Bool
-isPSymbol x db = isKeyword x || isVariable x || isConstant x || isLSymbol x db
-
-parseBlock :: ParserS String Char
-parseBlock s0 db
-  =  [ ("", s0) | s1 <- skip "[[:space:]]*" s0, null s1 ]
-  ++ [ ("", s0) | s1@(_:_) <- skip "[[:space:]]*" s0,
-                  (x,s2) <- lex s1,
-                  (x == ")" || x == "]" || x == "," || isInfixKeyword x) ]
-
-parseSequence :: Bool -> String -> ParserS [PTerm] Char
-parseSequence par sep s0 db
-  =  [ ([t], s2) | s1 <- skip "[[:space:]]*" s0,
-                   (t, s2) <- parsePTerm_ par s1 db,
-                   (x, s3) <- lex s2, x /= sep ]
-  ++ [ (t:ts, s4) | s1 <- skip "[[:space:]]*" s0,
-                    (t, s2) <- parsePTerm_ par s1 db,
-                    (x, s3) <- lex s2, x == sep,
-                    (ts, s4) <- parseSequence par sep s3 db ]
+parseSequence :: String -> ParserS [PTerm] Char
+parseSequence sep = "parse a sequence" >>>
+  if sep == "," then f parsePTerm else f parseSingleton
+  where
+    f g s0 db = [ ([t], s1)  | (t, s1) <- g s0 db, (x, s2) <- lex s1, x /= sep ] ++
+                [ (t:ts, s3) | (t, s1) <- g s0 db, (x, s2) <- lex s1, x == sep,
+                               (ts, s3) <- parseSequence sep s2 db ]
 
 parseSymbol :: ParserS PTerm Char
-parseSymbol s0 db
-  = [ (T x, s1) | (x, s1) <- parsePSymbol s0 db, ("", _) <- parseBlock s1 db ]
+parseSymbol = "parse a symbol statement" >>> \s0 db ->
+  [ (T x, s1) | (x, s1) <- parsePSymbol s0 db ]
 
-parseVariable :: Bool -> ParserS PTerm Char
-parseVariable par s0 db
-  = ([ (f x t, s3) | (x@(X _), s1) <- parsePSymbol s0 db,
-                     (t, s2) <- parsePTerm_ True s1 db,
-                     ("", s3) <- parseBlock s2 db ])
+parseTerm :: ParserS PTerm Char
+parseTerm = "parse a term statement" >>> \s0 db ->
+  [ (f x t, s2) | (x, s1) <- (parseVar +>+ parseLSymbol) s0 db,
+                  (t, s2) <- parseSingleton s1 db ]
   where
     f x (List :> ts) = x :> ts
     f x t            = x :>> t
 
-parseLSymbol :: Bool -> ParserS PTerm Char
-parseLSymbol par s0 db = if par
-  then []
-  else if length q > 1 then error ("(3) " ++ s0) else q
-    where
-      q = ([ (f x t, s3) | (x@(S _), s1) <- parsePSymbol s0 db,
-                         (t, s2) <- parsePTerm_ True s1 db,
-                         ("", s3) <- parseBlock s2 db ])
-      f x (List :> ts) = x :> ts
-      f x t            = x :>> t
-
 parseList :: ParserS PTerm Char
-parseList s0 db
-  =  if length q > 1 then error ("(4) " ++ s0) else q
-    where
-      q = [ (List :> ts, s3) | ("[", s1) <- lex s0,
-                          (ts, s2) <- parseSequence False "," s1 db,
-                          ("]", s3) <- lex s2 ]
+parseList = "parse a list statement" >>> \s0 db ->
+  [ (List :> ts, s3) | ("[", s1) <- lex s0,
+                       (ts@(_:_), s2) <- parseSequence "," s1 db,
+                       ("]", s3) <- lex s2 ]
 
 parseTuple :: ParserS PTerm Char
-parseTuple s0 db
-  =  if length q > 1 then error ("(5) " ++ s0) else q
-    where
-      q = ([ (t, s3) | ("(", s1) <- lex s0,
-                 ([t], s2) <- parseSequence False "," s1 db,
-                 (")", s3) <- lex s2 ] ++ [ (Tuple :> ts, s3) | ("(", s1) <- lex s0,
-                           (ts, s2) <- parseSequence False "," s1 db,
-                           (")", s3) <- lex s2 ])
+parseTuple = "parse a tuple statement" >>> \s0 db ->
+  [ (t, s3) | ("(", s1) <- lex s0,
+              ([t], s2) <- parseSequence "," s1 db,
+              (")", s3) <- lex s2 ] ++
+  [ (Tuple :> ts, s3) | ("(", s1) <- lex s0,
+                        (ts@(_:_:_), s2) <- parseSequence "," s1 db,
+                        (")", s3) <- lex s2 ]
 
-parseNot :: Bool -> ParserS PTerm Char
-parseNot par s0 db = if par
-  then []
-  else if length q > 1 then error ("(6) " ++ s0) else q
-    where
-      q = [ (Not :> [t], s2) | ("no", s1) <- lex s0,
-                            (t, s2) <- parsePTerm_ True s1 db ]
+parseNot :: ParserS PTerm Char
+parseNot = "parse 'no' statement" >>> \s0 db ->
+  [ (Not :> [t], s2) | ("no", s1) <- lex s0, (t, s2) <- parseSingleton s1 db ]
 
-parseAnd :: Bool -> ParserS PTerm Char
-parseAnd par s0 db = if par
-  then []
-  else if length q > 1 then error ("(7) " ++ s0) else q
-    where
-      q = [ (And :> ts, s1) | (ts@(_:_:_), s1) <- parseSequence True "and" s0 db ]
+parseAnd :: ParserS PTerm Char
+parseAnd = "parse 'and' statement" >>> \s0 db ->
+  [ (And :> ts, s1) | (ts@(_:_:_), s1) <- parseSequence "and" s0 db ]
 
-parseOr :: Bool -> ParserS PTerm Char
-parseOr par s0 db = if par
-  then []
-  else if length q > 1 then error ("(8) " ++ s0) else q
-    where
-      q = [ (Or :> ts, s1) | (ts@(_:_:_), s1) <- parseSequence True "or" s0 db ]
+parseOr :: ParserS PTerm Char
+parseOr = "parse 'or' statement" >>> \s0 db ->
+  [ (Or :> ts, s1) | (ts@(_:_:_), s1) <- parseSequence "or" s0 db ]
 
-parseEqual :: Bool -> ParserS PTerm Char
-parseEqual par s0 db = if par
-  then []
-  else if length q > 1 then error ("(9) " ++ s0) else q
-    where
-      q = [ (Equal :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "eq" s0 db ]
+parseEqual :: ParserS PTerm Char
+parseEqual = "parse 'eq' statement" >>> \s0 db ->
+  [ (Equal :> ts, s1) | (ts@[_,_], s1) <- parseSequence "eq" s0 db ]
 
-parseNEqual :: Bool -> ParserS PTerm Char
-parseNEqual par s0 db = if par
-  then []
-  else if length q > 1 then error ("(10) " ++ s0) else q
-    where
-      q = [ (NEqual :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "ne" s0 db ]
+parseNEqual :: ParserS PTerm Char
+parseNEqual = "parse 'ne' statement" >>> \s0 db ->
+  [ (NEqual :> ts, s1) | (ts@[_,_], s1) <- parseSequence "ne" s0 db ]
 
-parseIn :: Bool -> ParserS PTerm Char
-parseIn par s0 db = if par
-  then []
-  else if length q > 1 then error ("(11) " ++ s0) else q
-    where
-      q = [ (In :> ts, s1) | (ts@[_,_], s1) <- parseSequence True "in" s0 db ]
+parseIn :: ParserS PTerm Char
+parseIn = "parse 'in' statement" >>> \s0 db ->
+  [ (In :> ts, s1) | (ts@[_,_], s1) <- parseSequence "in" s0 db ]
 
-parseArgs :: Bool -> ParserS PTerm Char
-parseArgs par s0 db = if par
-  then []
-  else if length q > 1 then error ("(12) " ++ s0) else q
-    where
-      q = [ (Args :> [t], s2) | ("args", s1) <- lex s0,
-                             (t, s2) <- parsePTerm_ True s1 db ]
+parseArgs :: ParserS PTerm Char
+parseArgs = "parse 'args' statement" >>> \s0 db ->
+  [ (Args :> [t], s2) | ("args", s1) <- lex s0, (t, s2) <- parseSingleton s1 db ]
 
-parseReplace :: Bool -> ParserS PTerm Char
-parseReplace par s0 db = if par
-  then []
-  else if length q > 1 then error ("(13) " ++ s0) else q
-    where
-      q = [ (Replace :> [t1, t2], s3) | ("replace", s1) <- lex s0,
-                                     (t1, s2) <- parsePTerm_ True s1 db,
-                                     (t2, s3) <- parsePTerm_ True s2 db ]
+parseReplace :: ParserS PTerm Char
+parseReplace = "parse 'replace' statement" >>> \s0 db ->
+  [ (Replace :> [t1, t2], s3) | ("replace", s1) <- lex s0,
+                                (t1, s2) <- parseSingleton s1 db,
+                                (t2, s3) <- parseSingleton s2 db ]
 
--- | Parse a program term
-parsePTerm_ :: Bool -> ParserS PTerm Char
-parsePTerm_ par "" db = []
-parsePTerm_ par s0 db = if length q1 + length q2 + length q3 + length q4 + length q5 + length q6 + length q7 + length q8 + length q9 + length q10 + length q11 + length q12 + length q13 > 1 then error (show s0 ++ "\n1: " ++ show (length q1) ++ "\n2: " ++ show (length q2) ++ "\n3: " ++ show (length q3) ++ "\n4: " ++ show (length q4) ++ "\n5: " ++ show (length q5) ++ "\n6: " ++ show (length q6) ++ "\n7: " ++ show (length q7) ++ "\n8: " ++ show (length q8) ++ "\n9: " ++ show (length q9) ++ "\n10: " ++ show (length q10) ++ "\n11: " ++ show (length q11) ++ "\n12: " ++ show (length q12) ++ "\n13: " ++ show (length q13)) else q1 ++ q2 ++ q3 ++ q4 ++ q5 ++ q6 ++ q7 ++ q8 ++ q9 ++ q10 ++ q11 ++ q12 ++ q13
-  where
-    q1 = parseSymbol s0 db
-    q2 = parseVariable par s0 db
-    q3 = parseLSymbol par s0 db
-    q4 = parseList s0 db
-    q5 = parseTuple s0 db
-    q6 = parseNot par s0 db
-    q7 = parseAnd par s0 db
-    q8 = parseOr par s0 db
-    q9 = parseEqual par s0 db
-    q10 = parseNEqual par s0 db
-    q11 = parseIn par s0 db
-    q12 = parseArgs par s0 db
-    q13 = parseReplace par s0 db
+parseSingleton :: ParserS PTerm Char
+parseSingleton = parseSymbol +>+ parseList +>+ parseTuple
+
+parsePrefix :: ParserS PTerm Char
+parsePrefix = parseNot +>+ parseIn +>+ parseArgs +>+ parseReplace
+
+parseInfix :: ParserS PTerm Char
+parseInfix = parseAnd +>+ parseOr +>+ parseEqual +>+ parseNEqual
+
+parseKeyword :: ParserS PTerm Char
+parseKeyword = parsePrefix +>+ parseInfix
 
 -- | Parse a program term
 parsePTerm :: ParserS PTerm Char
-parsePTerm = parsePTerm_ False
+parsePTerm "" db = []
+parsePTerm x db = (parseKeyword +>+ parseTerm +>+ parseSingleton) x db
 
 -- | Write sequence of program terms
 writeSequence :: [PTerm] -> LSymbols -> String

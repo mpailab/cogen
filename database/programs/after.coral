@@ -1,0 +1,10 @@
+case t0 of
+  theorem [t1]
+  do
+    case t1 of
+      forall [boundVariables t2, premises t3, conclusion [t4]]
+      do
+        t7 [t5, t6] = t4 where t7 in [equality, equivalence]
+        done
+    done
+done

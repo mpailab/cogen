@@ -13,7 +13,7 @@ module Program.Parser
       Parser, ParserS,
       parse, parse_,
       write,
-      (+++), skip
+      (+>+), (>>>), skip
     )
 where
 
@@ -35,19 +35,23 @@ class Parser a where
 ------------------------------------------------------------------------------------------
 -- Function
 
-infixr 5 +++
-(+++) :: ParserS a b -> ParserS a b -> ParserS a b
-f +++ g = (\x db -> let s = g x db in if null s then f x db else s)
+infixl 5 +>+
+(+>+) :: ParserS a b -> ParserS a b -> ParserS a b
+f +>+ g = (\x db -> let s = f x db in if null s then g x db else s)
+
+infixr 6 >>>
+(>>>) :: Show b => String -> ParserS a b -> ParserS a b
+(>>>) s f x db
+  | (_:_:_) <- l = error $ "Parser error: Can't " ++ s ++ " in " ++ show x
+  | otherwise = l
+  where
+    l = f x db
 
 -- | Skip a pattern in a given string
 skip :: String -> String -> [String]
-skip pat str = if pat == "QQQ"
-  then
-    error ("Error:\n>>>" ++ str ++ "\n# " ++ show (str =~ "do[[:space:]]" :: (String, String, String)))
-  else
-    case (str =~ pat :: (String, String, String)) of
-      ("",_,r) -> [r]
-      _        -> []
+skip pat str = case (str =~ pat :: (String, String, String)) of
+  ("",_,r) -> [r]
+  _        -> []
 
 parseEither :: Parser a => String -> LSymbols -> Either String a
 parseEither str db =
