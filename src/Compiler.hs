@@ -166,8 +166,8 @@ linkProgram = do
 make :: Rule -> Compiler (Program, LSymbol) -> (Program, LSymbol)
 make rule = (`evalState` initInfo rule)
 
--- | Compile an inference rule
-compile :: Rule -> IO ()
+-- | Compile an inference rule to program
+compile :: Rule -> Global Program
 compile rule = do
   let file = "database/programs"
   let (prog, sym) = make rule $ do prepFilters

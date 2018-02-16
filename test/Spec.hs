@@ -21,7 +21,6 @@ test num = case num of
   1 -> make $ do
     lsym_db <- load "database/lsymbols.db"
     prog_str <- liftIO $ readFile "database/programs/before.coral"
-    liftIO $ print prog_str
     let prog = parse prog_str lsym_db :: Program
     liftIO $ writeFile "database/programs/after.coral" (write prog lsym_db)
     return True
