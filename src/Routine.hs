@@ -1,4 +1,7 @@
-{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE Rank2Types            #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
 
 {-|
 Module      : Routine
@@ -16,9 +19,18 @@ module Routine
 where
 
 -- External imports
+import           Control.Monad.State
+import qualified Data.Map            as Map
+import           Data.Maybe
 
 -- Internal imports
+import           Global
+import           LSymbol
 import           Problem
+import           Program
+import           Program.PSymbol     (PTerm)
+import qualified Program.PSymbol     as PSymbol
+import           Term
 
 type Routine = forall a b . [Term a] -> Global b
 
@@ -29,36 +41,79 @@ type Bilder a = State Args a
 class Build a b where
   build :: a -> Bilder b
 
+instance Build PTerm () where
+  build c = return ()
+
+instance Build PTerm Bool where
+  build c = return True
+
+instance Build PTerm LTerm where
+  build c = return (T NONE)
+
 instance Build Program () where
-  build prog = do
-    args <- get
-    case prog of
+  build (Assign p g c j) = do
+    t <- build g        -- build a term corresponding to the generator
+    jump <- ident t p c -- identify the term with the pattern by the condition
+    when jump (build j) -- build the next program fragment if the term matches the pattern
 
-    (Assign p g c j) -> do
-      term <- build g   -- build a term corresponding to the generator
-      ident p term      -- identify the term with the assigned pattern
-      build c >>= guard -- check the condition
-      build j           -- build the next program fragment
-      where
-        ident :: PTerm -> LTerm -> Bilder ()
-        ident (T $ PSymbol.X i) t = modify $ Map.insert i t
-        ident (T x) (T y) | x == PSymbol.S y = modify id
-        ident (x :> ps) (y :> ts) | x == PSymbol.S y = zipWithM_ ident ps ts
+  build (Branch c b j) = do
+    s <- get            -- save current state of Bilder
+    cond <- build c     -- build the condition
+    when cond (build b) -- build the branch program fragment if the condition holds
+    put s               -- restore current state of Bilder
+    build j             -- build the next program fragment
 
-    (Branch c b j) -> do
-      cond <- build c -- build the condition
-      if cond         -- check the condition
-        then build b  -- build the branch program fragment if the condition true
-        else build j  -- build the next program fragment if the condition false
+  build (Switch e c cs j) = do
+    s <- get            -- save current state of Bilder
+    t <- build e        -- build a term corresponing to the expression
+    buildCase t c cs    -- build a case corresponing to the term and the condition
+    put s               -- restore current state of Bilder
+    build j             -- build the next program fragment
 
-    (Switch e c cs j) -> do
-      term <- build e  -- build a term corresponing to the expression
-      cond <- build c  -- build the condition
-      forM_ cs (\(p,b) -> ident p term >> build b)
+  build (Action a c j) = do
+    cond <- build c     -- build the condition
+    when cond (build a) -- build the action if the condition holds
+    build j             -- build the next program fragment
 
-    (Action a c j)    -> do
-      build c >>= guard -- check the condition
-      build a           -- build and apply the action
-      build j           -- build the next program fragment
+  build Empty = return ()
 
-    Empty             -> return
+
+-- Identify a term with a given pattern by a condition
+-- Returns True if there is an assignment of pattern's variables for which the term
+-- matches the pattern and the condition holds, and False otherwise.
+-- Warnings: State of Bilder can be changed only if the term matches the pattern.
+ident :: LTerm -- a term
+      -> PTerm -- a pattern
+      -> PTerm -- a condition
+      -> Bilder Bool
+ident t p c = do
+  s <- get                -- save current state of Bilder
+  is_match <- liftM2 (&&) (ident' t p) (build c) -- identify term with pattern by condition
+  unless is_match (put s) -- restore current state of Bilder if necessary
+  return is_match
+  where
+    ident' :: LTerm -> PTerm -> Bilder Bool
+    ident' t (T (PSymbol.X i)) = do
+      s <- get
+      case Map.lookup i s of
+        Just x
+          | x == t    -> return True
+          | otherwise -> return False
+        Nothing       -> modify (Map.insert i t) >> return True
+
+    ident' (T x) (T y)
+      | PSymbol.S x == y  = return True
+      | otherwise         = return False
+
+    ident' (x :> ts) (y :> ps)
+      | PSymbol.S x == y  = fmap and (zipWithM ident' ts ps)
+      | otherwise         = return False
+
+    ident' _ _ = return False
+
+-- Build a case corresponing to a given term
+buildCase :: LTerm -> PTerm -> [(PTerm, Program)] -> Bilder ()
+buildCase t c [] = return ()
+buildCase t c ((p,b):ncs) = do
+  is_match <- ident t p c
+  if is_match then build b else buildCase t c ncs

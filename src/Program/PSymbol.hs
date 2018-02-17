@@ -24,7 +24,7 @@ Warning: Constructors of program symbols are private, do not exporte it.
 module Program.PSymbol
     (
       -- exports
-      PSymbol (B, List, And), PTerm,
+      PSymbol(..), PTerm,
       parsePTerm,
       var, cons,
       Program.PSymbol.list, list',

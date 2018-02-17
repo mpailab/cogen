@@ -22,7 +22,7 @@ In order to add new logical symbol need:
 module LSymbol
     (
       -- exports
-      LSymbol, LSymbols, LTerm,
+      LSymbol(NONE), LSymbols, LTerm,
       initLSymbols,
       name, lsymbol, addLSymbol, isLSymbol
     )
@@ -44,7 +44,8 @@ import           Term
 -- Data and type declaration
 
 -- | Type of logical symbols
-data LSymbol = X Int                    -- ^ variable
+data LSymbol = NONE
+             | X Int                    -- ^ variable
              | I Int                    -- ^ integer constant
              | S Int                    -- ^ user-defined logical symbol
              deriving (Eq, Ord)

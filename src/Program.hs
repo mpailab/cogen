@@ -69,7 +69,7 @@ data Program
   | Switch
     {
       expression :: PTerm,              -- ^ expression
-      condition  :: PTerm,               -- ^ condition for switching
+      condition  :: PTerm,              -- ^ condition for switching
       cases      :: [(PTerm, Program)], -- ^ list of pairs (pattern, program fragment)
       jump       :: Program             -- ^ jump to next program fragment
     }
