@@ -41,14 +41,15 @@ type Bilder a = State Args a
 class Build a b where
   build :: a -> Bilder b
 
-instance Build PTerm () where
-  build c = return ()
-
-instance Build PTerm Bool where
-  build c = return True
-
-instance Build PTerm LTerm where
-  build c = return (T NONE)
+instance Build PTerm a where
+  build t = do
+    s <- get
+    case t of
+      sym :> ts       -> foldr (\ x y -> fmap y (build x ts)) (PSymbol.eval sym) ts
+      T (PSymbol.X i) -> case Map.lookup i s of
+        Just x  -> return x
+        Nothing -> error "Builder error: a variable is not initialized\n"
+      T sym           -> return $ PSymbol.eval sym
 
 instance Build Program () where
   build (Assign p g c j) = do
@@ -114,6 +115,4 @@ ident t p c = do
 -- Build a case corresponing to a given term
 buildCase :: LTerm -> PTerm -> [(PTerm, Program)] -> Bilder ()
 buildCase t c [] = return ()
-buildCase t c ((p,b):ncs) = do
-  is_match <- ident t p c
-  if is_match then build b else buildCase t c ncs
+buildCase t c ((p,b):cs) = ident t p c >>= \x -> if x then build b else buildCase t c cs

@@ -19,6 +19,7 @@ library
                        Global
                        LSymbol
                        Program
+                       Program.Handle
                        Program.Parser
                        Program.PSymbol
                        Rule

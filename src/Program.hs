@@ -113,8 +113,8 @@ instance Parser Program where
 
       skipEmpty :: [(Int, String)] -> [(Int, String)]
       skipEmpty ((_,""):s) = skipEmpty s
-      skipEmpty (x:s) = (x:(skipEmpty s))
-      skipEmpty [] = []
+      skipEmpty (x:s)      = (x:(skipEmpty s))
+      skipEmpty []         = []
 
       pullChunk :: [(Int, String)] -> [(Int, String)]
       pullChunk ((i,a):y@((j,b):s))

@@ -34,16 +34,16 @@ module Program.PSymbol
       Program.PSymbol.eq,
       Program.PSymbol.neq,
       Program.PSymbol.args,
-      eval,
       isAction, isBool
     )
 where
 
 -- External imports
+import           Control.Monad.State
 import           Data.Char
 import           Data.List
-import           Data.Map       ((!))
-import qualified Data.Map       as M
+import           Data.Map            ((!))
+import qualified Data.Map            as Map
 import           Data.Maybe
 
 -- Internal imports
@@ -222,7 +222,7 @@ parseKeyword = parsePrefix +>+ parseInfix
 -- | Parse a program term
 parsePTerm :: ParserS PTerm Char
 parsePTerm "" db = []
-parsePTerm x db = (parseKeyword +>+ parseTerm +>+ parseSingleton) x db
+parsePTerm x db  = (parseKeyword +>+ parseTerm +>+ parseSingleton) x db
 
 -- | Write sequence of program terms
 writeSequence :: [PTerm] -> LSymbols -> String
@@ -352,52 +352,6 @@ args t = Args :> [t]
 
 ------------------------------------------------------------------------------------------
 -- Evaluating functions
-
--- | Evaluate a program symbol
-class Eval a where
-  eval :: PSymbol -> a
-
-instance Eval ((Int -> Term a) -> Term a) where
-  eval (X i) f = f i
-
-instance Eval Int where
-  eval (X i) = i
-  eval (I i) = i
-
-instance Eval Bool where
-  eval (B c) = c
-
-instance Eval LSymbol where
-  eval (S s) = s
-
-instance Eval ([Term a] -> Term a) where
-  eval Tuple [x] = x
-
-instance Eval ([Term a] -> (Term a, Term a)) where
-  eval Tuple [x1,x2] = (x1,x2)
-
-instance Eval ([Term a] -> (Term a, Term a, Term a)) where
-  eval Tuple [x1,x2,x3] = (x1,x2,x3)
-
-instance Eval ([Term a] -> (Term a, Term a, Term a, Term a)) where
-  eval Tuple [x1,x2,x3,x4] = (x1,x2,x3,x4)
-
-instance Eval ([Term a] -> (Term a, Term a, Term a, Term a, Term a)) where
-  eval Tuple [x1,x2,x3,x4,x5] = (x1,x2,x3,x4,x5)
-
-instance Eval (Bool -> Bool) where
-  eval Not = Prelude.not
-
-instance Eval (Bool -> Bool -> Bool) where
-  eval And = (&&)
-  eval Or  = (||)
-
-instance Eq a => Eval (a -> a -> Bool) where
-  eval Equal  = (==)
-  eval NEqual = (/=)
-
-instance Eval (Term a -> [Term a]) where
-  eval Args = Term.args
 
 ------------------------------------------------------------------------------------------
 -- Functions
