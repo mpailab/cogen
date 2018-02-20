@@ -35,8 +35,9 @@ handle p s = return $ evalState (run p) s
 
 data Expr = BE Bool
           | IE Int
+          | SE LSymbol
           | TE LTerm
-          | SE [Expr]
+          | LE [Expr]
           deriving (Eq)
 
 type Args = Map.Map Int Expr
@@ -55,9 +56,9 @@ eval (T (I i)) = return (IE i)
 
 eval (T (B c)) = return (BE c)
 
-eval (T (S x)) = return (TE (T x))
+eval (T (S x)) = return (SE x)
 
-eval (List :> x) = SE <$> mapM eval x
+eval (List :> x) = LE <$> mapM eval x
 
 eval (Not :> [x]) = eval x >>= \(BE y) -> (return . BE . Prelude.not) y
 
@@ -71,7 +72,7 @@ eval (NEqual :> [x,y]) = BE <$> liftM2 (/=) (eval x) (eval y)
 
 eval (In :> [x, List :> y]) = BE <$> liftM2 elem (eval x) (mapM eval y)
 
-eval (Args :> [x]) = eval x >>= \(TE t) -> (return . SE . fmap TE . Term.args) t
+eval (Args :> [x]) = eval x >>= \(TE t) -> (return . LE . fmap TE . Term.args) t
 
 
 make :: PTerm -> Handler ()
@@ -101,7 +102,7 @@ ident (x :> ps) (TE (y :> ts))
   | x == S y               = fmap Prelude.and (zipWithM ident ps (fmap TE ts))
   | otherwise              = return False
 
-ident (List :> x) (SE y)
+ident (List :> x) (LE y)
   | length x == length y = fmap Prelude.and (zipWithM ident x y)
   | otherwise            = return False
 
