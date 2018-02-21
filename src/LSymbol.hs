@@ -24,7 +24,8 @@ module LSymbol
       -- exports
       LSymbol, LSymbols, LTerm,
       initLSymbols,
-      name, lsymbol, addLSymbol, isLSymbol
+      name, lsymbol, addLSymbol, isLSymbol,
+       LSymbolsBase, lsymbols
     )
 where
 
@@ -64,6 +65,9 @@ type LSymbols = (Array Int LSymbolInfo, M.Map String LSymbol)
 
 -- | Type of logical terms
 type LTerm = Term LSymbol
+
+class Monad m => LSymbolsBase m where
+  lsymbols :: m LSymbols
 
 ------------------------------------------------------------------------------------------
 -- Show instances

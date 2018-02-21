@@ -39,6 +39,7 @@ import           Program.Parser
 import           Program.PSymbol   (PTerm)
 import qualified Program.PSymbol   as P
 import           Term
+import Program.Data
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -91,233 +92,106 @@ data Program
 type Programs = M.Map LSymbol Program
 
 ------------------------------------------------------------------------------------------
--- Parser instances
+-- Write instances
 
--- | Parser instance for Program
-instance Parser Program where
-  write  = writeProgram 0
+instance Write Program where
+  write prog = writeProgram 0 prog
 
-  parse_ x db = case f (map g (lines x)) db of
-    [(prog,[])] -> [(prog,"")]
-    [] -> error ("\n" ++ (show . addWhere . pullWhere . foldWhere . pullChunk . skipEmpty) (map g (lines x)) ++ "\n")
-    y -> error (h y)
-    where
-      h = foldr (\(p,z) u -> "\nprog: " ++ write p db ++ "\ntail: " ++ show z ++ u) "\n"
+writeIndent :: LSymbolsBase m => Int -> m String
+writeIndent 0 = return ""
+writeIndent n = (' ' : ' ' : ) <$> writeIndent (n-1)
 
-      f :: ParserS Program (Int, String)
-      f = parseProgram . addWhere . pullWhere . foldWhere . pullChunk . skipEmpty
-
-      g :: String -> (Int, String)
-      g (' ':' ':x) = let (i,y) = g x in (i+1,y)
-      g x           = (0, T.unpack $ T.strip $ T.pack x)
-
-      skipEmpty :: [(Int, String)] -> [(Int, String)]
-      skipEmpty ((_,""):s) = skipEmpty s
-      skipEmpty (x:s)      = (x:(skipEmpty s))
-      skipEmpty []         = []
-
-      pullChunk :: [(Int, String)] -> [(Int, String)]
-      pullChunk ((i,a):y@((j,b):s))
-        | i < j-1 = pullChunk ((i,a++" "++b):s)
-        | otherwise = ((i,a):(pullChunk y))
-      pullChunk (x:s) = (x:(pullChunk s))
-      pullChunk [] = []
-
-      foldWhere :: [(Int, String)] -> [(Int, String)]
-      foldWhere ((i,a):y@((j,b):(k,c):(l,d):s))
-        | i == j-1 && j == k-1 && k == l && b =~ "where"
-          = foldWhere ((i,a):(j,b):(k,c++" and "++d):s)
-        | otherwise = ((i,a):(foldWhere y))
-      foldWhere (x:s) = (x:(foldWhere s))
-      foldWhere [] = []
-
-      pullWhere :: [(Int, String)] -> [(Int, String)]
-      pullWhere ((i,a):y@((j,b):(k,c):s))
-        | i == j-1 && j == k-1 && b == "where"
-          = pullWhere ((i,a ++ " where " ++ c):s)
-        | otherwise = ((i,a):(pullWhere y))
-      pullWhere (x:s) = (x:(pullWhere s))
-      pullWhere [] = []
-
-      addWhere :: [(Int, String)] -> [(Int, String)]
-      addWhere ((i,a):y@((j,b):s))
-        | a /= "do" && a /= "done" && not (elem "where" (words a)) && b /= "do"
-          = addWhere ((i,a ++ " where True"):y)
-        | otherwise = ((i,a):(addWhere y))
-      addWhere (x:s) = (x:(addWhere s))
-      addWhere [] = []
-
--- | Parse a program fragment
-parseProgram :: ParserS Program (Int, String)
-parseProgram x db
-  =  parseAssign x db
-  ++ parseBranch x db
-  ++ parseSwitch x db
-  ++ parseAction x db
-  ++ parseEmpty  x db
-
--- | Parse a list of program fragments
-parsePrograms :: ParserS [(PTerm, Program)] (Int, String)
-parsePrograms ((i,a):(j,"do"):s) db
-  = [ ((pat,prog):cs, t) | i == j,
-      (pat,"") <- parsePTerm a db,
-      (prog,u) <- parseProgram s db,
-      (cs,t) <- if null u || fst (head u) < i then [([],u)] else parsePrograms u db ]
-parsePrograms _ db = []
-
--- | Parse an assigning instruction
-parseAssign :: ParserS Program (Int, String)
-parseAssign ((i,a):s) db
-  =  [ (Assign pat (P.list val) cond jump, t) |
-       [s1, s2, s3] <- [cut a ["=", "where"]],
-       (pat,"") <- parsePTerm s1 db,
-       (val,"") <- parsePTerm s2 db,
-       (cond,"") <- parsePTerm s3 db,
-       (jump,t) <- parseProgram s db ]
-  ++ [ (Assign pat gen cond jump, t) |
-       [s1, s2, s3] <- [cut a ["<-", "where"]],
-       (pat,"") <- parsePTerm s1 db,
-       (gen,"") <- parsePTerm s2 db,
-       (cond,"") <- parsePTerm s3 db,
-       (jump,t) <- parseProgram s db ]
-parseAssign _ db = []
-
--- | Parse a branching instruction
-parseBranch :: ParserS Program (Int, String)
-parseBranch ((i,a):(j,"do"):s@((k,_):_)) db
-  =  [ (Branch cond br jump, t) | i == j && j == k-1,
-       ["", s1] <- [cut a ["if"]],
-       (cond,"") <- parsePTerm s1 db,
-       (br,u) <- parseProgram s db,
-       (jump,t) <- parseProgram u db ]
-parseBranch _ db = []
-
--- | Parse a switching instruction
-parseSwitch :: ParserS Program (Int, String)
-parseSwitch x@((i,a):(j,b):s) db
-  =  [ (Switch expr cond cs jump, t) |
-       ["", s1, "", s2] <- [cut a ["case", "of", "where"]],
-       (expr,"") <- parsePTerm s1 db,
-       (cond,"") <- parsePTerm s2 db,
-       (cs,u) <- if i == j-1 then parsePrograms ((j,b):s) db else [([],(j,b):s)],
-       (jump,t) <- parseProgram u db ]
-parseSwitch _ db = []
-
--- | Parse an acting instruction
-parseAction :: ParserS Program (Int, String)
-parseAction ((i,a):s) db
-  =  [ (Action act cond jump, t) |
-       [s1, s2] <- [cut a ["where"]],
-       (act,"") <- parsePTerm s1 db, P.isAction act,
-       (cond,"") <- parsePTerm s2 db,
-       (jump,t) <- parseProgram s db ]
-parseAction _ db = []
-
--- | Parse an empty program fragment corresponding to a given indent
-parseEmpty :: ParserS Program (Int, String)
-parseEmpty ((i,"done"):s) db = [ (Empty, s) ]
-parseEmpty _ db              = []
-
-cut :: String -> [String] -> [String]
-cut s0 (p:ps) = let (s1,_,s2) = (s0 =~ (" *"++p++" *") :: (String,String,String))
-                in s1:(cut s2 ps)
-cut s0 [] = [s0]
-
-writeIndent :: Int -> String
-writeIndent 0 = ""
-writeIndent n = ' ' : ' ' : writeIndent (n-1)
-
-writeWhere :: Int -> [PTerm] -> LSymbols -> String
-writeWhere ind (t:ts) db = writeIndent ind ++ write t db ++ "\n" ++ writeWhere ind ts db
-writeWhere ind [] db = ""
+writeWhere :: LSymbolsBase m => Int -> [PTerm] -> m String
+writeWhere ind [] = return ""
+writeWhere ind (t:ts) = writeIndent ind +>+ write t +>+ pure "\n" +>+ writeWhere ind ts
 
 -- | Write a program fragment corresponding to a given indent
-writeProgram :: Int -> Program -> LSymbols -> String
+writeProgram :: Int -> Program -> m String
 
 -- | Write an assigning instruction of program fragment corresponding to a given indent
-writeProgram ind (Assign pat (P.List :> [val]) (T (P.B True)) jump) db =
-  writeIndent ind ++ write pat db ++ " = " ++ write val db  ++ "\n" ++
-  writeProgram ind jump db
+writeProgram ind (Assign pat (P.List :> [val]) (T (P.B True)) jump) =
+  writeIndent ind +>+ write pat +>+ pure " = " +>+ write val +>+ pure "\n" +>+
+  writeProgram ind jump
 
-writeProgram ind (Assign pat (P.List :> [val]) (P.And :> conds) jump) db =
-  writeIndent ind ++ write pat db ++ " = " ++ write val db  ++ "\n" ++
-  writeIndent ind ++ "  where\n" ++
-  writeWhere (ind+2) conds db ++
-  writeProgram ind jump db
+writeProgram ind (Assign pat (P.List :> [val]) (P.And :> conds) jump) =
+  writeIndent ind +>+ write pat +>+ pure " = " +>+ write val +>+ pure "\n" +>+
+  writeIndent ind +>+ pure "  where\n" +>+
+  writeWhere (ind+2) conds +>+
+  writeProgram ind jump
 
-writeProgram ind (Assign pat (P.List :> [val]) cond jump) db =
-  writeIndent ind ++ write pat db  ++ " = " ++ write val db  ++
-  " where " ++ write cond db  ++ "\n" ++
-  writeProgram ind jump db
+writeProgram ind (Assign pat (P.List :> [val]) cond jump) =
+  writeIndent ind +>+ write pat  +>+ pure " = " +>+ write val  +>+
+  " where " +>+ write cond  +>+ pure "\n" +>+
+  writeProgram ind jump
 
-writeProgram ind (Assign pat gen (T (P.B True)) jump) db =
-  writeIndent ind ++ write pat db  ++ " <- " ++ write gen db  ++ "\n" ++
-  writeProgram ind jump db
+writeProgram ind (Assign pat gen (T (P.B True)) jump) =
+  writeIndent ind +>+ write pat  +>+ pure " <- " +>+ write gen  +>+ pure "\n" +>+
+  writeProgram ind jump
 
-writeProgram ind (Assign pat gen (P.And :> conds) jump) db =
-  writeIndent ind ++ write pat db  ++ " <- " ++ write gen db  ++ "\n" ++
-  writeIndent ind ++ "  where\n" ++
-  writeWhere (ind+2) conds db ++
-  writeProgram ind jump db
+writeProgram ind (Assign pat gen (P.And :> conds) jump) =
+  writeIndent ind +>+ write pat  +>+ pure " <- " +>+ write gen  +>+ pure "\n" +>+
+  writeIndent ind +>+ pure "  where\n" +>+
+  writeWhere (ind+2) conds +>+
+  writeProgram ind jump
 
-writeProgram ind (Assign pat gen cond jump) db =
-  writeIndent ind ++ write pat db  ++ " <- " ++ write gen db  ++
-  " where " ++ write cond db  ++ "\n" ++
-  writeProgram ind jump db
+writeProgram ind (Assign pat gen cond jump) =
+  writeIndent ind +>+ write pat  +>+ pure " <- " +>+ write gen  +>+
+  " where " +>+ write cond  +>+ pure "\n" +>+
+  writeProgram ind jump
 
 -- | Write a branching instruction of program fragment corresponding to a given indent
-writeProgram ind (Branch cond br jump) db =
-  writeIndent ind ++ "if " ++ write cond db  ++ "\n" ++
-  writeIndent ind ++ "do\n" ++
-  writeProgram (ind+1) br db ++
-  writeProgram ind jump db
+writeProgram ind (Branch cond br jump) =
+  writeIndent ind +>+ pure "if " +>+ write cond  +>+ pure "\n" +>+
+  writeIndent ind +>+ pure "do\n" +>+
+  writeProgram (ind+1) br +>+
+  writeProgram ind jump
 
 -- | Write a switching instruction of program fragment corresponding to a given indent
-writeProgram ind (Switch expr (T (P.B True)) cs jump) db =
-  writeIndent ind ++ "case " ++ write expr db  ++ " of\n" ++
-  writeSwitchCases (ind+1) cs db ++
-  writeProgram ind jump db
+writeProgram ind (Switch expr (T (P.B True)) cs jump) =
+  writeIndent ind +>+ pure "case " +>+ write expr  +>+ pure " of\n" +>+
+  writeSwitchCases (ind+1) cs +>+
+  writeProgram ind jump
 
-writeProgram ind (Switch expr (P.And :> conds) cs jump) db =
-  writeIndent ind ++ "case " ++ write expr db  ++ " of\n" ++
-  writeIndent ind ++ "  where\n" ++
-  writeWhere (ind+2) conds db ++
-  writeSwitchCases (ind+1) cs db ++
-  writeProgram ind jump db
+writeProgram ind (Switch expr (P.And :> conds) cs jump) =
+  writeIndent ind +>+ pure "case " +>+ write expr  +>+ pure " of\n" +>+
+  writeIndent ind +>+ pure "  where\n" +>+
+  writeWhere (ind+2) conds +>+
+  writeSwitchCases (ind+1) cs +>+
+  writeProgram ind jump
 
-writeProgram ind (Switch expr cond cs jump) db =
-  writeIndent ind ++ "case " ++ write expr db  ++ " of\n" ++
-  " where " ++ write cond db  ++ "\n" ++
-  writeSwitchCases (ind+1) cs db ++
-  writeProgram ind jump db
+writeProgram ind (Switch expr cond cs jump) =
+  writeIndent ind +>+ pure "case " +>+ write expr  +>+ pure " of\n" +>+
+  " where " +>+ write cond  +>+ pure "\n" +>+
+  writeSwitchCases (ind+1) cs +>+
+  writeProgram ind jump
 
 -- | Write an acting instruction of program fragment corresponding to a given indent
-writeProgram ind (Action act (T (P.B True)) jump) db =
-  writeIndent ind ++ write act db  ++ "\n" ++
-  writeProgram ind jump db
+writeProgram ind (Action act (T (P.B True)) jump) =
+  writeIndent ind +>+ write act  +>+ pure "\n" +>+
+  writeProgram ind jump
 
-writeProgram ind (Action act (P.And :> cs) jump) db =
-  writeIndent ind ++ write act db  ++ "\n" ++
-  writeIndent ind ++ "  where\n" ++
-  writeWhere (ind+2) cs db ++
-  writeProgram ind jump db
+writeProgram ind (Action act (P.And :> cs) jump) =
+  writeIndent ind +>+ write act  +>+ pure "\n" +>+
+  writeIndent ind +>+ pure "  where\n" +>+
+  writeWhere (ind+2) cs +>+
+  writeProgram ind jump
 
-writeProgram ind (Action act cond jump) db =
-  writeIndent ind ++ write act db  ++
-  " where " ++ write cond db  ++ "\n" ++
-  writeProgram ind jump db
+writeProgram ind (Action act cond jump) =
+  writeIndent ind +>+ write act  +>+
+  pure " where " +>+ write cond  +>+ pure "\n" +>+
+  writeProgram ind jump
 
 -- | Write an empty program fragment corresponding to a given indent
-writeProgram ind Empty db =
-  writeIndent ind ++ "done\n"
+writeProgram ind Empty =
+  writeIndent ind +>+ pure "done\n"
 
-writeSwitchCases :: Int -> [(PTerm, Program)] -> LSymbols -> String
-writeSwitchCases ind ((pat,prog):cs) db =
-  writeIndent ind ++ write pat db  ++ "\n" ++
-  writeIndent ind ++ "do\n" ++
-  writeProgram (ind+1) prog db ++
-  writeSwitchCases ind cs db
-writeSwitchCases ind [] db = ""
+writeSwitchCases :: LSymbolsBase m => Int -> [(PTerm, Program)] -> m String
+writeSwitchCases ind ((pat,prog):cs) =
+  writeIndent ind +>+ write pat  +>+ pure "\n" +>+
+  writeIndent ind +>+ pure "do\n" +>+
+  writeProgram (ind+1) prog +>+
+  writeSwitchCases ind cs
+writeSwitchCases ind [] = return ""
 
 ------------------------------------------------------------------------------------------
 -- Database instances
