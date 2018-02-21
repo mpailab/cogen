@@ -42,8 +42,6 @@ type Global = StateT Info IO
 data Info = Info
   {
     lsymbols :: LSymbols, -- ^ database of logical symbols
-    globals  :: Map.Map String Int,
-    locals   :: Map.Map String Int,
     programs :: Programs  -- ^ database of programs
     -- routines :: Routines
   }

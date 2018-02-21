@@ -26,7 +26,7 @@ library
                        Term
   build-depends:       base >= 4.7 && < 5,
                        containers, strict, mtl, directory, filepath, MissingH,
-                       array, regex-posix, text
+                       array, regex-posix, text, parsec
   default-language:    Haskell2010
 
 executable cogen-exe

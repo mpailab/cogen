@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 {-|
 Module      : Program.Parser
 Description :
@@ -11,54 +13,156 @@ module Program.Parser
     (
       -- exports
       Parser, ParserS,
-      parse, parse_,
+      Program.Parser.parse, parse_,
       write,
-      (+>+), (>>>), skip
+      (+>+), (>>>), skip, parsePTerm
     )
 where
 
 -- External imports
+import           Control.Monad.State
+import           Data.Char
+import           Data.List
+import qualified Data.Map               as Map
+import           Data.Maybe
+import           Text.Parsec
+import           Text.Parsec.Char
+import           Text.Parsec.Combinator
+import           Text.Parsec.Prim
+import qualified Text.Parsec.Text       as PT
 import           Text.Regex.Posix
 
 -- Internal imports
 import           LSymbol
+import           Program.PSymbol
+import           Term
 
-------------------------------------------------------------------------------------------
--- Data and type declaration
+data Info = Info
+  {
+    lsymbols :: LSymbols,
+    locals   :: Map.Map String Int,
+    varnum   :: Int
+  }
 
-type ParserS a b = [b] -> LSymbols -> [(a, [b])]
+type Parser a = PT.GenParser Info a
 
-class Parser a where
-  parse_ :: ParserS a Char
-  write  :: a -> LSymbols -> String
+addVar :: String -> Info -> Info
+addVar name info =
+  let n = varnum info
+      l = locals info
+  in info {varnum = n + 1, locals = Map.insert name n l}
 
-------------------------------------------------------------------------------------------
--- Function
+parseVar :: Parser PSymbol
+parseVar = do
+  name <- many1 letter
+  info <- getState
+  case Map.lookup name (locals info) of
+    Just n -> return (X n)
+    otherwise -> modifyState (addVar name) >> return (X (varnum info))
 
-infixl 5 +>+
-(+>+) :: ParserS a b -> ParserS a b -> ParserS a b
-f +>+ g = (\x db -> let s = f x db in if null s then g x db else s)
+parseInt :: Parser PSymbol
+parseInt = (I . read) <$> many1 digit
 
-infixr 6 >>>
-(>>>) :: Show b => String -> ParserS a b -> ParserS a b
-(>>>) s f x db
-  | (_:_:_) <- l = error $ "Parser error: Can't " ++ s ++ " in " ++ show x
-  | otherwise = l
+parseBool :: Parser PSymbol
+parseBool = (I . read) <$> (string "True" <|> string "False")
+
+parseLSymbol :: Parser PSymbol
+parseLSymbol = S <$> liftM2 lsymbol (many1 letter) (fmap lsymbols getState)
+
+-- | Parse a program symbol
+parsePSymbol :: Parser PSymbol
+parsePSymbol = choice [parseInt, parseBool, parseLSymbol, parseVar]
+
+parseSymbol :: Parser PTerm
+parseSymbol = T <$> parsePSymbol
+
+parseTerm :: Parser PTerm
+parseTerm = liftM2 f (choice [parseLSymbol, parseVar]) parseToken
   where
-    l = f x db
+    f x (List :> ts) = x :> ts
+    f x t            = x :>> t
 
--- | Skip a pattern in a given string
-skip :: String -> String -> [String]
-skip pat str = case (str =~ pat :: (String, String, String)) of
-  ("",_,r) -> [r]
-  _        -> []
+parseToken :: Parser PTerm
+parseToken = spaces >> choice [parseSymbol, parseList, parseTuple] <* spaces
 
-parseEither :: Parser a => String -> LSymbols -> Either String a
-parseEither str db =
-  case [ x | (x,"") <- parse_ str db ] of
-    [x] -> Right x
-    []  -> Left "Parser: no parse"
-    _   -> Left "Parser: ambiguous parse"
+parseList :: Parser PTerm
+parseList = (List :>) <$> between (char '[') (char ']') (sepBy parsePTerm (char ','))
 
-parse :: Parser a => String -> LSymbols -> a
-parse str db = either error id (parseEither str db)
+parseTuple :: Parser PTerm
+parseTuple = (List :>) <$> between (char '(') (char ')') (sepBy parsePTerm (char ','))
+
+parseNot :: Parser PTerm
+parseNot = (Not :>) <$> parseToken
+
+parseAnd :: Parser PTerm
+parseAnd = (And :>) <$> sepBy parseToken (string "and")
+
+parseAnd :: Parser PTerm
+parseAnd = (Or :>) <$> sepBy parseToken (string "or")
+
+parseEqual :: Parser PTerm
+parseEqual = liftM2 (\x y -> Equal :> [x,y]) parseToken (string "eq" >> parseToken)
+
+parseNEqual :: Parser PTerm
+parseNEqual = liftM2 (\x y -> NEqual :> [x,y]) parseToken (string "ne" >> parseToken)
+
+parseIn :: Parser PTerm
+parseIn = liftM2 (\x y -> In :> [x,y]) parseToken (string "in" >> parseToken)
+
+parseArgs :: Parser PTerm
+parseArgs = fmap (\x -> Args :>[x]) parseToken
+
+parseReplace :: Parser PTerm
+parseReplace = (Replace :>) <$> string "replace" >> count 2 parseToken
+
+parsePrefix :: Parser PTerm
+parsePrefix = choice [parseNot, parseIn, parseArgs, parseReplace]
+
+parseInfix :: Parser PTerm
+parseInfix = choice [parseAnd, parseOr, parseEqual, parseNEqual]
+
+parseKeyword :: Parser PTerm
+parseKeyword = choice [parsePrefix, parseInfix]
+
+-- | Parse a program term
+parsePTerm :: Parser PTerm
+parsePTerm = spaces >> choice [parseKeyword, parseTerm, parseToken] <* spaces
+
+parseDo :: Parser Program
+parseDo = string "do" >> parseProgram
+
+parseWhere :: Parser PTerm
+parseWhere = PSymbol.and <$> option [] (string "where" >> many1 parsePTerm)
+
+-- | Parse an assigning instruction
+parseAssign :: Parser Program
+parseAssign = do
+  pat <- parsePTerm <* char '=' <|> string "<-"
+  liftM3 (Assign pat) parsePTerm parseWhere parseProgram
+
+-- | Parse a branching instruction
+parseBranch :: Parser Program
+parseBranch = liftM3 Branch (string "if" >> parsePTerm) parseDo parseProgram
+
+-- | Parse a switching instruction
+parseSwitch :: Parser Program
+parseSwitch = do
+  expr <- string "case" >> parsePTerm <* string "of"
+  cond <- parseWhere
+  cases <- many1 (liftM2 ((,)) parsePTerm parseDo)
+  (Switch expr cond cases) <$> parseProgram
+
+-- | Parse an acting instruction
+parseAction :: Parser Program
+parseAction = do
+  act <- parsePTerm
+  when (isAction act) (liftM2 (Action act) parseWhere parseProgram)
+
+-- | Parse an empty instruction
+parseEmpty :: Parser Program
+parseEmpty = string "done" >> return Empty
+addWhere [] = []
+
+-- | Parse a program fragment
+parseProgram :: Parser Program
+parseProgram = spaces >> choice [parseAssign, parseBranch, parseSwitch, parseAction, parseEmpty] <* spaces

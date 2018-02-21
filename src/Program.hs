@@ -36,7 +36,7 @@ import           Text.Regex.Posix
 import           Database
 import           LSymbol
 import           Program.Parser
-import           Program.PSymbol   (PTerm, parsePTerm)
+import           Program.PSymbol   (PTerm)
 import qualified Program.PSymbol   as P
 import           Term
 
