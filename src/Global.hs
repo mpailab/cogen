@@ -41,10 +41,13 @@ type Global = StateT Info IO
 -- | Type of global informational structure
 data Info = Info
   {
-    lsymbols :: LSymbols, -- ^ database of logical symbols
-    programs :: Programs  -- ^ database of programs
+    _lsymbols :: LSymbols, -- ^ database of logical symbols
+    programs  :: Programs  -- ^ database of programs
     -- routines :: Routines
   }
+
+instance LSymbolsBase Global where
+  lsymbols = _lsymbols
 
 ------------------------------------------------------------------------------------------
 -- Functions

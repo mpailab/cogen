@@ -57,7 +57,7 @@ parseVar = do
   name <- many1 letter
   info <- getState
   case Map.lookup name (locals info) of
-    Just n -> return (X n)
+    Just n    -> return (X n)
     otherwise -> modifyState (addVar name) >> return (X (varnum info))
 
 parseInt :: Parser PSymbol
@@ -67,7 +67,7 @@ parseBool :: Parser PSymbol
 parseBool = (I . read) <$> (string "True" <|> string "False")
 
 parseLSymbol :: Parser PSymbol
-parseLSymbol = S <$> liftM2 lsymbol (many1 letter) (fmap lsymbols getState)
+parseLSymbol = S <$> liftM2 lsymbol (many1 letter) (lsymbols <$> getState)
 
 -- | Parse a program symbol
 parsePSymbol :: Parser PSymbol
@@ -137,7 +137,7 @@ parseWhere = PSymbol.and <$> option [] (string "where" >> many1 parsePTerm)
 -- | Parse an assigning instruction
 parseAssign :: Parser Program
 parseAssign = do
-  pat <- parsePTerm <* char '=' <|> string "<-"
+  pat <- parsePTerm <* (char '=' <|> string "<-")
   liftM3 (Assign pat) parsePTerm parseWhere parseProgram
 
 -- | Parse a branching instruction

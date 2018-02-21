@@ -69,6 +69,9 @@ type LTerm = Term LSymbol
 class Monad m => LSymbolsBase m where
   lsymbols :: m LSymbols
 
+  getLSymbol :: String -> m LSymbol
+  getLSymbol str = fromJust . Map.lookup str . snd <$> lsymbols
+
 ------------------------------------------------------------------------------------------
 -- Show instances
 
