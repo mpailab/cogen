@@ -22,10 +22,9 @@ In order to add new logical symbol need:
 module LSymbol
     (
       -- exports
-      LSymbol, LSymbols, LTerm,
-      initLSymbols,
-      name, lsymbol, addLSymbol, isLSymbol,
-       LSymbolsBase, lsymbols
+      LSymbol, LSymbols, LTerm, Base,
+      getDB, setDB, name, get, add, check,
+      initLSymbols
     )
 where
 
@@ -66,11 +65,42 @@ type LSymbols = (Array Int LSymbolInfo, M.Map String LSymbol)
 -- | Type of logical terms
 type LTerm = Term LSymbol
 
-class Monad m => LSymbolsBase m where
-  lsymbols :: m LSymbols
+-- | Base class of logical symbols
+--   Minimal complete definition: getDB, setDB
+class Monad m => Base m where
 
-  getLSymbol :: String -> m LSymbol
-  getLSymbol str = fromJust . Map.lookup str . snd <$> lsymbols
+  -- | Get a database of logical symbols
+  getDB :: m LSymbols
+
+  -- | Set a database of logical symbols
+  setDB :: LSymbols -> m ()
+
+  -- | Get the name of a logical symbol
+  name :: LSymbol -> m String
+  name (S n) = getDB >>= \db -> return (name_ $ fst db ! n)
+
+  -- | Get a logical symbol by the name or synonym
+  get :: String -> m LSymbol
+  get str = fromJust . M.lookup str . snd <$> getDB
+
+  -- | Add a new logical symbol defined by 'info' to a database
+  add :: String   -- ^ name
+      -> [String] -- ^ list of synonyms
+      -> [String] -- ^ list of categories
+      -> String   -- ^ description
+      -> m ()
+  add n s c d = do
+    db <- getDB
+    let (f,l) = bounds $ fst db
+    let i = l-1
+    let sym = S i
+    let a = listArray (f,i) $ elems (fst db) ++ [Symbol i n s c d]
+    let b = foldr (\x y -> M.insert x sym y) (M.insert n sym $ snd db) s
+    setDB (a,b)
+
+  -- | Does a string correspond to a logical symbol
+  check :: String -> m Bool
+  check s = (isJust . M.lookup s . snd) <$> getDB
 
 ------------------------------------------------------------------------------------------
 -- Show instances
@@ -148,31 +178,3 @@ instance Database String LSymbols IO where
 -- | Init a database of logical symbols
 initLSymbols :: LSymbols
 initLSymbols = (array (1,0) [], M.empty)
-
--- | Get the name of a logical symbol
-name :: LSymbol -> LSymbols -> String
-name (S n) db = name_ $ fst db ! n
-
--- | Get a logical symbol by the name or synonym
-lsymbol :: String -> LSymbols -> LSymbol
-lsymbol s db = fromJust $ M.lookup s (snd db)
-
--- | Add a new logical symbol defined by 'info' to a database
-addLSymbol :: String   -- ^ name
-           -> [String] -- ^ list of synonyms
-           -> [String] -- ^ list of categories
-           -> String   -- ^ description
-           -> LSymbols -> LSymbols
-addLSymbol n s c d db = do
-  let (f,l) = bounds $ fst db
-  let i = l-1
-  let sym = S i
-  let a = listArray (f,i) $ elems (fst db) ++ [Symbol i n s c d]
-  let b = foldr (\x y -> M.insert x sym y) (M.insert n sym $ snd db) s
-  (a,b)
-
--- | Does a string correspond to a logical symbol
-isLSymbol :: String -> LSymbols -> Bool
-isLSymbol ('x':s) _ = all isDigit s
-isLSymbol ('i':s) _ = all isDigit s
-isLSymbol s db      = isJust $ M.lookup s (snd db)

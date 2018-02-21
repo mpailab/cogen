@@ -2,21 +2,21 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 {-|
-Module      : Program
-Description : Representation of programs
-Copyright   : (c) Grigoriy Bokov, 2017
+Module      : Coral.Program
+Description : Representation of Coral programs
+Copyright   : (c) Grigoriy Bokov, 2018
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 
-A program is a collection of instructions that organizes as a tree in which every node represents an instruction performing a specific task. Each task is described by programs terms. Every instruction contains a list of numbers of depended program variables and jump to the next program fragment (except the acting instruction which is a terminal of program).
+A Coral program is a collection of instructions that organizes as a tree in which every node represents an instruction performing a specific task. Each task is described by programs terms.
 -}
-module Program
+module Coral.Program
     (
       -- exports
-      Program(..), Programs,
-      initPrograms
+      Program(..), Programs, Base,
+      getDB, setDB, Coral.Program.init, get, add
     )
 where
 
@@ -33,13 +33,12 @@ import           System.IO
 import           Text.Regex.Posix
 
 -- Internal imports
+import           Coral.Symbol
+import           Coral.Utils
 import           Database
-import           LSymbol
-import           Program.Parser
-import           Program.PSymbol   (PTerm)
-import qualified Program.PSymbol   as P
+import           LSymbol (LSymbol, LSymbols)
+import qualified LSymbol as LSymbol
 import           Term
-import Program.Data
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -91,44 +90,66 @@ data Program
 -- | Type of programs database
 type Programs = M.Map LSymbol Program
 
+-- | Base class of programs
+--   Minimal complete definition: getDB, setDB
+class Monad m => Base m where
+
+  -- | Get a database of programs
+  getDB :: m Programs
+
+  -- | Set a database of programs
+  setDB :: Programs -> m ()
+
+  -- | Init a database of programs
+  init :: m Programs
+  init = let db = M.empty in setDB db >> return db
+
+  -- | Get the program of logical symbol
+  get :: LSymbol -> m Program
+  get s = (fromJust . M.lookup s) <$> getDB
+
+  -- | Add a program of logical symbol to a database
+  add :: LSymbol -> Program -> m ()
+  add s p = getDB >>= setDB . M.insert s p
+
 ------------------------------------------------------------------------------------------
 -- Write instances
 
 instance Write Program where
   write prog = writeProgram 0 prog
 
-writeIndent :: LSymbolsBase m => Int -> m String
+writeIndent :: LSymbol.Base m => Int -> m String
 writeIndent 0 = return ""
-writeIndent n = (' ' : ' ' : ) <$> writeIndent (n-1)
+writeIndent n = writeIndent (n-1) >>= \x -> return (' ' : ' ' : x)
 
-writeWhere :: LSymbolsBase m => Int -> [PTerm] -> m String
+writeWhere :: LSymbol.Base m => Int -> [PTerm] -> m String
 writeWhere ind [] = return ""
 writeWhere ind (t:ts) = writeIndent ind +>+ write t +>+ pure "\n" +>+ writeWhere ind ts
 
 -- | Write a program fragment corresponding to a given indent
-writeProgram :: Int -> Program -> m String
+writeProgram :: LSymbol.Base m => Int -> Program -> m String
 
 -- | Write an assigning instruction of program fragment corresponding to a given indent
-writeProgram ind (Assign pat (P.List :> [val]) (T (P.B True)) jump) =
+writeProgram ind (Assign pat (List :> [val]) (T (B True)) jump) =
   writeIndent ind +>+ write pat +>+ pure " = " +>+ write val +>+ pure "\n" +>+
   writeProgram ind jump
 
-writeProgram ind (Assign pat (P.List :> [val]) (P.And :> conds) jump) =
+writeProgram ind (Assign pat (List :> [val]) (And :> conds) jump) =
   writeIndent ind +>+ write pat +>+ pure " = " +>+ write val +>+ pure "\n" +>+
   writeIndent ind +>+ pure "  where\n" +>+
   writeWhere (ind+2) conds +>+
   writeProgram ind jump
 
-writeProgram ind (Assign pat (P.List :> [val]) cond jump) =
+writeProgram ind (Assign pat (List :> [val]) cond jump) =
   writeIndent ind +>+ write pat  +>+ pure " = " +>+ write val  +>+
-  " where " +>+ write cond  +>+ pure "\n" +>+
+  pure " where " +>+ write cond  +>+ pure "\n" +>+
   writeProgram ind jump
 
-writeProgram ind (Assign pat gen (T (P.B True)) jump) =
+writeProgram ind (Assign pat gen (T (B True)) jump) =
   writeIndent ind +>+ write pat  +>+ pure " <- " +>+ write gen  +>+ pure "\n" +>+
   writeProgram ind jump
 
-writeProgram ind (Assign pat gen (P.And :> conds) jump) =
+writeProgram ind (Assign pat gen (And :> conds) jump) =
   writeIndent ind +>+ write pat  +>+ pure " <- " +>+ write gen  +>+ pure "\n" +>+
   writeIndent ind +>+ pure "  where\n" +>+
   writeWhere (ind+2) conds +>+
@@ -136,7 +157,7 @@ writeProgram ind (Assign pat gen (P.And :> conds) jump) =
 
 writeProgram ind (Assign pat gen cond jump) =
   writeIndent ind +>+ write pat  +>+ pure " <- " +>+ write gen  +>+
-  " where " +>+ write cond  +>+ pure "\n" +>+
+  pure " where " +>+ write cond  +>+ pure "\n" +>+
   writeProgram ind jump
 
 -- | Write a branching instruction of program fragment corresponding to a given indent
@@ -147,12 +168,12 @@ writeProgram ind (Branch cond br jump) =
   writeProgram ind jump
 
 -- | Write a switching instruction of program fragment corresponding to a given indent
-writeProgram ind (Switch expr (T (P.B True)) cs jump) =
+writeProgram ind (Switch expr (T (B True)) cs jump) =
   writeIndent ind +>+ pure "case " +>+ write expr  +>+ pure " of\n" +>+
   writeSwitchCases (ind+1) cs +>+
   writeProgram ind jump
 
-writeProgram ind (Switch expr (P.And :> conds) cs jump) =
+writeProgram ind (Switch expr (And :> conds) cs jump) =
   writeIndent ind +>+ pure "case " +>+ write expr  +>+ pure " of\n" +>+
   writeIndent ind +>+ pure "  where\n" +>+
   writeWhere (ind+2) conds +>+
@@ -161,16 +182,16 @@ writeProgram ind (Switch expr (P.And :> conds) cs jump) =
 
 writeProgram ind (Switch expr cond cs jump) =
   writeIndent ind +>+ pure "case " +>+ write expr  +>+ pure " of\n" +>+
-  " where " +>+ write cond  +>+ pure "\n" +>+
+  pure " where " +>+ write cond  +>+ pure "\n" +>+
   writeSwitchCases (ind+1) cs +>+
   writeProgram ind jump
 
 -- | Write an acting instruction of program fragment corresponding to a given indent
-writeProgram ind (Action act (T (P.B True)) jump) =
+writeProgram ind (Action act (T (B True)) jump) =
   writeIndent ind +>+ write act  +>+ pure "\n" +>+
   writeProgram ind jump
 
-writeProgram ind (Action act (P.And :> cs) jump) =
+writeProgram ind (Action act (And :> cs) jump) =
   writeIndent ind +>+ write act  +>+ pure "\n" +>+
   writeIndent ind +>+ pure "  where\n" +>+
   writeWhere (ind+2) cs +>+
@@ -185,7 +206,7 @@ writeProgram ind (Action act cond jump) =
 writeProgram ind Empty =
   writeIndent ind +>+ pure "done\n"
 
-writeSwitchCases :: LSymbolsBase m => Int -> [(PTerm, Program)] -> m String
+writeSwitchCases :: LSymbol.Base m => Int -> [(PTerm, Program)] -> m String
 writeSwitchCases ind ((pat,prog):cs) =
   writeIndent ind +>+ write pat  +>+ pure "\n" +>+
   writeIndent ind +>+ pure "do\n" +>+
@@ -197,23 +218,24 @@ writeSwitchCases ind [] = return ""
 -- Database instances
 
 -- | Database instance for programs
-instance Database (String, LSymbols) Programs IO where
+instance (LSymbol.Base m, Base m) => Database String Programs m where
 
   -- | Load the database of programs from a given directory
-  load (dir, lsym_db) = do
-    dir_content <- try (listDirectory dir) :: IO (Either IOError [FilePath])
+  load dir = do
+    dir_content <- try (listDirectory dir) -- :: m (Either IOError [FilePath])
     case dir_content of
-       Left _            -> return M.empty
-       Right dir_content -> foldM f M.empty dir_content
+       Left _            -> Coral.Program.init
+       Right dir_content -> foldM f Coral.Program.init dir_content
        where
-         f :: Programs -> FilePath -> IO Programs
-         f db file = do
-           content <- try (readFile file) :: IO (Either IOError FilePath)
+         f :: (LSymbol.Base m, Base m) => FilePath -> m ()
+         f file = do
+           db <- getDB
+           lsym_db <- LSymbol.getDB
+           content <- try (readFile file) -- :: IO (Either IOError FilePath)
            case content of
-              Left _        -> return db
-              Right content -> return (addProgram s (parse content lsym_db) db)
-              where
-                  s = lsymbol (read $ takeBaseName file) lsym_db
+              Left _        -> return ()
+              Right content -> add (LSymbol.get (read $ takeBaseName file))
+                                   (parse content lsym_db)
 
   -- | Save a database of programs to a given directory
   save db (dir, lsym_db) = do
@@ -241,15 +263,3 @@ instance Database (String, LSymbol, LSymbols) Program IO where
 
 ------------------------------------------------------------------------------------------
 -- Functions
-
--- | Init a database of programs
-initPrograms :: Programs
-initPrograms = M.empty
-
--- | Get the program of logical symbol
-program :: LSymbol -> Programs -> Program
-program s db = fromJust $ M.lookup s db
-
--- | Add a program of logical symbol to a database
-addProgram :: LSymbol -> Program -> Programs -> Programs
-addProgram = M.insert

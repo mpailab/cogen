@@ -18,10 +18,12 @@ library
   exposed-modules:     Database
                        Global
                        LSymbol
-                       Program
-                       Program.Handle
-                       Program.Parser
-                       Program.PSymbol
+                       Coral.Data
+                       Coral.Handle
+                       Coral.Parser
+                       Coral.Program
+                       Coral.PSymbol
+                       Coral.Utils
                        Rule
                        Term
   build-depends:       base >= 4.7 && < 5,

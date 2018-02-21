@@ -27,10 +27,12 @@ import           Control.Monad.State
 import qualified Data.Map            as Map
 
 -- Internal imports
-import           Program
+import           Coral.Data (Programs)
+import qualified Coral.Data as Program
 -- import           Routine
 import           Database
-import           LSymbol
+import           LSymbol             (LSymbols)
+import qualified LSymbol             as LSymbol
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -41,13 +43,21 @@ type Global = StateT Info IO
 -- | Type of global informational structure
 data Info = Info
   {
-    _lsymbols :: LSymbols, -- ^ database of logical symbols
+    lsymbols :: LSymbols, -- ^ database of logical symbols
     programs  :: Programs  -- ^ database of programs
     -- routines :: Routines
   }
 
-instance LSymbolsBase Global where
-  lsymbols = _lsymbols
+------------------------------------------------------------------------------------------
+-- Base instances
+
+instance LSymbol.Base Global where
+  LSymbol.getDB = lsymbols
+  LSymbol.setDB db = modify (\info -> info { lsymbols = db })
+
+instance Program.Base Global where
+  Program.getDB = programs
+  Program.setDB db = modify (\info -> info { programs = db })
 
 ------------------------------------------------------------------------------------------
 -- Functions

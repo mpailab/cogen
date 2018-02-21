@@ -1,21 +1,18 @@
 {-# LANGUAGE FlexibleInstances #-}
 
 {-|
-Module      : Program.Parser
-Description :
-Copyright   : (c) Grigoriy Bokov, 2017
+Module      : Coral.Parser
+Description : Parser for Coral language
+Copyright   : (c) Grigoriy Bokov, 2018
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 -}
-module Program.Parser
+module Coral.Parser
     (
       -- exports
-      Parser, ParserS,
-      Program.Parser.parse, parse_,
-      write,
-      (+>+), (>>>), skip, parsePTerm
+      Parser
     )
 where
 
@@ -29,12 +26,13 @@ import           Text.Parsec
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
 import           Text.Parsec.Prim
-import qualified Text.Parsec.Text       as PT
+import  Text.Parsec.Text
 import           Text.Regex.Posix
 
 -- Internal imports
+import           Coral.Program
+import           Coral.Symbol
 import           LSymbol
-import           Program.PSymbol
 import           Term
 
 data Info = Info
@@ -44,7 +42,11 @@ data Info = Info
     varnum   :: Int
   }
 
-type Parser a = PT.GenParser Info a
+type Parser a = GenParser Info a
+
+instance LSymbol.Base Parser where
+  LSymbol.getDB = lsymbols
+  LSymbol.setDB db = modify (\info -> info { lsymbols = db })
 
 addVar :: String -> Info -> Info
 addVar name info =

@@ -2,9 +2,9 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 {-|
-Module      : Program.PSymbol
-Description : Program symbols and terms
-Copyright   : (c) Grigoriy Bokov, 2017
+Module      : Coral.Symbol
+Description : Types of symbols and terms in Coral rograms
+Copyright   : (c) Grigoriy Bokov, 2018
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
@@ -21,19 +21,18 @@ In order to add new program symbol need:
 Warning: Constructors of program symbols are private, do not exporte it.
          Try use composing and evaluating functions for this.
 -}
-module Program.PSymbol
+module Coral.Symbol
     (
       -- exports
       PSymbol(..), PTerm,
-      -- parsePTerm,
       var, cons,
-      Program.PSymbol.list, list',
-      Program.PSymbol.not,
-      Program.PSymbol.and, and',
-      Program.PSymbol.or, or',
-      Program.PSymbol.eq,
-      Program.PSymbol.neq,
-      Program.PSymbol.args,
+      Coral.Symbol.list, list',
+      Coral.Symbol.not,
+      Coral.Symbol.and, and',
+      Coral.Symbol.or, or',
+      Coral.Symbol.eq,
+      Coral.Symbol.neq,
+      Coral.Symbol.args,
       isAction, isBool
     )
 where
@@ -47,9 +46,10 @@ import qualified Data.Map            as Map
 import           Data.Maybe
 
 -- Internal imports
-import           LSymbol
+import           Coral.Utils
+import           LSymbol (LSymbol)
+import qualified LSymbol
 import           Term
-import Program.Data
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -96,30 +96,30 @@ instance Show PSymbol where
   show Replace   = "replace"
 
 -- | Write a program symbol
-writePSymbol :: LSymbolsBase m => PSymbol -> m String
-writePSymbol (S s) = (name s) <$> lsymbols
+writePSymbol :: LSymbol.Base m => PSymbol -> m String
+writePSymbol (S s) = LSymbol.name s
 writePSymbol s     = return (show s)
 
 instance Write PTerm where
   write = writePTerm False
 
 -- | Write sequence of program terms
-writeSequence :: LSymbolsBase m => [PTerm] -> m String
+writeSequence :: LSymbol.Base m => [PTerm] -> m String
 writeSequence [t]    = writePTerm False t
 writeSequence (t:ts) = writePTerm False t +>+ pure ", " +>+ writeSequence ts
 
 -- | Write prefix expression
-writePrefx :: LSymbolsBase m => PSymbol -> [PTerm] -> m String
+writePrefx :: LSymbol.Base m => PSymbol -> [PTerm] -> m String
 writePrefx x [t] = write x +>+ writePTerm True t
 writePrefx x ts =  write x +>+ (unwords <$> (mapM (\t -> writePTerm True t) ts))
 
 -- | Write infix expression
-writeInfx :: LSymbolsBase m => PSymbol -> [PTerm] -> m String
+writeInfx :: LSymbol.Base m => PSymbol -> [PTerm] -> m String
 writeInfx x ts = liftM2 intercalate (pure " " +>+ write x +>+ pure " ")
                                     (mapM (\t -> writePTerm True t) ts)
 
 -- | Write a program term
-writePTerm :: LSymbolsBase m => Bool -> PTerm -> m String
+writePTerm :: LSymbol.Base m => Bool -> PTerm -> m String
 writePTerm par t = let (x,y) = f t in if par && y then pure "(" +>+ x +>+ pure ")" else x
   where
     f (T x)            = (write x, False)

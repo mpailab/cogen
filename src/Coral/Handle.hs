@@ -4,15 +4,15 @@
 {-# LANGUAGE TypeSynonymInstances      #-}
 
 {-|
-Module      : Program.Handle
-Description : Program interpreter
-Copyright   : (c) Grigoriy Bokov, 2017
+Module      : Coral.Handle
+Description : Interpreter for Coral language
+Copyright   : (c) Grigoriy Bokov, 2018
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 -}
-module Program.Handle
+module Coral.Handle
     (
       -- exports
     )
@@ -26,8 +26,8 @@ import qualified Data.Map            as Map
 -- Internal imports
 import           Global              (Global)
 import           LSymbol
-import           Program
-import           Program.PSymbol
+import           Coral.Program
+import           Coral.Symbol
 import           Term
 
 handle :: Program -> Args -> Global ()
@@ -41,8 +41,6 @@ data Expr = BE Bool
           | FE Expr -> Expr
           | FIOE (Expr -> IO ())
           deriving (Eq)
-
-
 
 type Args = Map.Map Int Expr
 
