@@ -18,8 +18,11 @@ module Database
     )
 where
 
+-- External imports
+import           Control.Monad.IO.Class
+
 -- | Class of functions
-class Monad m => Database a b m where
+class MonadIO m => Database a b m where
 
   -- | Load the database from a given file
   load :: a -> m b

@@ -22,17 +22,27 @@ In order to add new logical symbol need:
 module LSymbol
     (
       -- exports
-      LSymbol, LSymbols, LTerm, Base,
-      getDB, setDB, name, get, add, check,
-      initLSymbols
+      addLSymbol,
+      Base,
+      checkLSymbol,
+      getLSymbol,
+      getLSymbols,
+      initLSymbols,
+      LSymbol,
+      LSymbols,
+      LTerm,
+      nameLSymbol,
+      newLSymbols,
+      setLSymbols
     )
 where
 
 -- External imports
 import           Control.Exception
+import           Control.Monad.IO.Class
 import           Data.Array
 import           Data.Char
-import qualified Data.Map          as M
+import qualified Data.Map               as M
 import           Data.Maybe
 import           System.IO
 
@@ -62,45 +72,53 @@ data LSymbolInfo = Symbol
 -- | Type for database of logical symbols
 type LSymbols = (Array Int LSymbolInfo, M.Map String LSymbol)
 
+-- | Init a database of logical symbols
+initLSymbols :: LSymbols
+initLSymbols = (array (1,0) [], M.empty)
+
 -- | Type of logical terms
 type LTerm = Term LSymbol
 
 -- | Base class of logical symbols
---   Minimal complete definition: getDB, setDB
 class Monad m => Base m where
+  {-# MINIMAL getLSymbols, setLSymbols #-}
 
   -- | Get a database of logical symbols
-  getDB :: m LSymbols
+  getLSymbols :: m LSymbols
 
   -- | Set a database of logical symbols
-  setDB :: LSymbols -> m ()
+  setLSymbols :: LSymbols -> m ()
+
+  -- | Init a new database of logical symbols
+  newLSymbols :: m LSymbols
+  newLSymbols = let db = initLSymbols in setLSymbols db >> return db
 
   -- | Get the name of a logical symbol
-  name :: LSymbol -> m String
-  name (S n) = getDB >>= \db -> return (name_ $ fst db ! n)
+  nameLSymbol :: LSymbol -> m String
+  nameLSymbol (S n) = getLSymbols >>= \db -> return (name_ $ fst db ! n)
 
   -- | Get a logical symbol by the name or synonym
-  get :: String -> m LSymbol
-  get str = fromJust . M.lookup str . snd <$> getDB
+  getLSymbol :: String -> m LSymbol
+  getLSymbol str = fromJust . M.lookup str . snd <$> getLSymbols
 
   -- | Add a new logical symbol defined by 'info' to a database
-  add :: String   -- ^ name
-      -> [String] -- ^ list of synonyms
-      -> [String] -- ^ list of categories
-      -> String   -- ^ description
-      -> m ()
-  add n s c d = do
-    db <- getDB
+  addLSymbol :: String   -- ^ name
+             -> [String] -- ^ list of synonyms
+             -> [String] -- ^ list of categories
+             -> String   -- ^ description
+             -> m ()
+  addLSymbol n s c d = do
+    db <- getLSymbols
     let (f,l) = bounds $ fst db
     let i = l-1
     let sym = S i
     let a = listArray (f,i) $ elems (fst db) ++ [Symbol i n s c d]
     let b = foldr (\x y -> M.insert x sym y) (M.insert n sym $ snd db) s
-    setDB (a,b)
+    setLSymbols (a,b)
 
   -- | Does a string correspond to a logical symbol
-  check :: String -> m Bool
-  check s = (isJust . M.lookup s . snd) <$> getDB
+  checkLSymbol :: String -> m Bool
+  checkLSymbol s = (isJust . M.lookup s . snd) <$> getLSymbols
 
 ------------------------------------------------------------------------------------------
 -- Show instances
@@ -150,11 +168,11 @@ instance Read LSymbolInfo where
 -- Database instances
 
 -- | Database instance for logical symbols
-instance Database String LSymbols IO where
+instance MonadIO m => Database String LSymbols m where
 
   -- | Load the database of logical symbols from a given file
   load file = do
-    content <- try (readFile file) :: IO (Either IOError FilePath)
+    content <- liftIO (try (readFile file) :: IO (Either IOError FilePath))
     case content of
       Left _        -> fail ( "Can't read database of logical symbols from the file \'"
                               ++ file ++ "\'")
@@ -170,11 +188,7 @@ instance Database String LSymbols IO where
                     in foldr (\x y -> M.insert x sym y) (M.insert n sym db) s
 
   -- | Save a database of logical symbols to a given file
-  save db file = writeFile file $ show (elems $ fst db)
+  save db file = (liftIO . writeFile file) $ show (elems $ fst db)
 
 ------------------------------------------------------------------------------------------
 -- Functions
-
--- | Init a database of logical symbols
-initLSymbols :: LSymbols
-initLSymbols = (array (1,0) [], M.empty)

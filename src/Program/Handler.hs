@@ -4,33 +4,35 @@
 {-# LANGUAGE TypeSynonymInstances      #-}
 
 {-|
-Module      : Coral.Handle
-Description : Interpreter for Coral language
+Module      : Program.Handler
+Description : Programs interpreter
 Copyright   : (c) Grigoriy Bokov, 2018
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 -}
-module Coral.Handle
+module Program.Handler
     (
       -- exports
+      handle
     )
 where
 
 -- External imports
 import           Control.Monad.State
 import           Data.Foldable
-import qualified Data.Map            as Map
+import qualified Data.Map            as M
 
 -- Internal imports
-import           Global              (Global)
 import           LSymbol
-import           Coral.Program
-import           Coral.Symbol
+import           Program
 import           Term
 
-handle :: Program -> Args -> Global ()
+------------------------------------------------------------------------------------------
+-- Data types and clases declaration
+
+handle :: Monad m => Program -> Args -> m ()
 handle p s = return $ evalState (run p) s
 
 data Expr = BE Bool
@@ -38,19 +40,20 @@ data Expr = BE Bool
           | SE LSymbol
           | TE LTerm
           | LE [Expr]
-          | FE Expr -> Expr
-          | FIOE (Expr -> IO ())
           deriving (Eq)
 
-type Args = Map.Map Int Expr
+type Args = M.Map Int Expr
 
 type Handler a = State Args a
+
+------------------------------------------------------------------------------------------
+-- Functions
 
 eval :: PTerm -> Handler Expr
 
 eval (T (X i)) = do
     table <- get
-    case Map.lookup i table of
+    case M.lookup i table of
       Just x  -> return x
       Nothing -> error "Evaluating error: a variable is not initialized\n"
 
@@ -89,11 +92,11 @@ ident :: PTerm -> Expr -> Handler Bool
 
 ident (T (X i)) e = do
   s <- get
-  case Map.lookup i s of
+  case M.lookup i s of
     Just x
       | x == e    -> return True
       | otherwise -> return False
-    Nothing       -> modify (Map.insert i e) >> return True
+    Nothing       -> modify (M.insert i e) >> return True
 
 ident (T x) (TE (T y))
   | x == S y  = return True
@@ -101,11 +104,11 @@ ident (T x) (TE (T y))
 
 ident (x :> ps) (TE (y :> ts))
   | length ps /= length ts = return False
-  | x == S y               = fmap Prelude.and (zipWithM ident ps (fmap TE ts))
+  | x == S y               = fmap and (zipWithM ident ps (fmap TE ts))
   | otherwise              = return False
 
 ident (List :> x) (LE y)
-  | length x == length y = fmap Prelude.and (zipWithM ident x y)
+  | length x == length y = fmap and (zipWithM ident x y)
   | otherwise            = return False
 
 ident _ _ = return False
