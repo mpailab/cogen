@@ -33,7 +33,7 @@ library
 
 executable cogen-exe
   hs-source-dirs:      app
-  main-is:             main.hs
+  main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -fwarn-missing-signatures
   build-depends:       base
                      , cogen
@@ -42,7 +42,7 @@ executable cogen-exe
 test-suite cogen-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
-  main-is:             spec.hs
+  main-is:             Spec.hs
   build-depends:       base, directory, mtl
                      , cogen
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N -fwarn-missing-signatures

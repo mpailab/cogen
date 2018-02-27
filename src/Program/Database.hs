@@ -59,7 +59,7 @@ instance (LSymbol.Base m, Program.Base m, MonadIO m) => Database String Programs
               Left _        -> return ()
               Right content -> join $ liftM2 addProgram
                                              (getLSymbol (read $ takeBaseName file))
-                                             (parse content)
+                                             (parse content file)
 
   -- | Save a database of programs to a given directory
   save db dir = do
@@ -79,7 +79,7 @@ instance (LSymbol.Base m, Program.Base m, MonadIO m) =>
     content <- liftIO (try (readFile file) :: IO (Either IOError FilePath))
     case content of
       Left _        -> return Empty
-      Right content -> parse content
+      Right content -> parse content file
 
   -- | Save a program of logical symbol to a database saved in given directory
   save p (dir, s) = do

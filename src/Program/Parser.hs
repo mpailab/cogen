@@ -34,6 +34,7 @@ import           Text.Parsec.Text       hiding (Parser)
 import           LSymbol
 import           Program
 import           Term
+import           Utils
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -52,31 +53,44 @@ instance LSymbol.Base Parser where
   setLSymbols db = modifyState (\info -> info { lsymbols = db })
 
 class Parse a where
-  parse :: LSymbol.Base m => String -> m a
+  parse :: LSymbol.Base m => String -> String -> m a
 
 -- | Parse instance for program symbols
 instance Parse PSymbol where
-  parse str = getLSymbols >>= \db ->
-    case runParser parsePSymbol (Info db M.empty 1) "" (Text.pack str) of
+  parse str source = getLSymbols >>= \db ->
+    case runParser parsePSymbol (Info db M.empty 1) source (Text.pack str) of
       Right s   -> return s
-      Left  err -> (error . unwords . map messageString . errorMessages) err
+      Left  err -> (error . errorToString) err
 
 -- | Parse instance for program terms
 instance Parse PTerm where
-  parse str = getLSymbols >>= \db ->
-    case runParser parsePTerm (Info db M.empty 1) "" (Text.pack str) of
+  parse str source = getLSymbols >>= \db ->
+    case runParser parsePTerm (Info db M.empty 1) source (Text.pack str) of
       Right t   -> return t
-      Left  err -> (error . unwords . map messageString . errorMessages) err
+      Left  err -> (error . errorToString) err
 
 -- | Parse instance for programs
 instance Parse Program where
-  parse str = getLSymbols >>= \db ->
-    case runParser parseProgram (Info db M.empty 1) "" (Text.pack str) of
+  parse str source = getLSymbols >>= \db ->
+    case runParser parseProgram (Info db M.empty 1) source (Text.pack str) of
       Right p   -> return p
-      Left  err -> (error . unwords . map messageString . errorMessages) err
+      Left  err -> (error . errorToString) err
+
+errorToString :: ParseError -> String
+errorToString err = "Program parser error:\n"
+  ++ file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")\n"
+  ++ (unlines . map messageString . errorMessages) err
+  where
+    pos = errorPos err
+    file = sourceName pos
+    i = sourceLine pos
+    j = sourceColumn pos
 
 ------------------------------------------------------------------------------------------
 -- Functions
+
+word :: Parser String
+word = try $ (many1 $ (choice [alphaNum, oneOf "_-"] <?> "QQQ")) >>= \x -> echo ("word : " ++ x ++ "\n") >> return x
 
 addVar :: String -> Info -> Info
 addVar name info =
@@ -86,45 +100,45 @@ addVar name info =
 
 parseVar :: Parser PSymbol
 parseVar = do
-  name <- many1 letter
+  name <- word <?> "can't parse a name of variable"
   info <- getState
   case M.lookup name (locals info) of
     Just n -> return (X n)
     _      -> modifyState (addVar name) >> return (X (varnum info))
 
 parseInt :: Parser PSymbol
-parseInt = (I . read) <$> many1 digit
+parseInt = try ((I . read) <$> many1 digit) <?> "can't parse an integer"
 
 parseBool :: Parser PSymbol
-parseBool = (I . read) <$> (string "True" <|> string "False")
+parseBool = try $ (I . read) <$> (string "True" <|> string "False")
 
 parseLSymbol :: Parser PSymbol
-parseLSymbol = S <$> (getLSymbol =<< many1 letter)
+parseLSymbol = (try $ S <$> (getLSymbol =<< word)) <?> "LSymbol"
 
 -- | Parse a program symbol
 parsePSymbol :: Parser PSymbol
-parsePSymbol = choice [parseInt, parseBool, parseLSymbol, parseVar]
+parsePSymbol = choice [parseInt, parseBool, parseLSymbol, parseVar] <?> "PSymbol"
 
 parseSymbol :: Parser PTerm
-parseSymbol = T <$> parsePSymbol
+parseSymbol = (try $ T <$> parsePSymbol) <?> "Symbol"
 
 parseTerm :: Parser PTerm
-parseTerm = liftM2 f (choice [parseLSymbol, parseVar]) parseToken
+parseTerm = (try $ liftM2 f (choice [parseLSymbol, parseVar]) parseToken) <?> "Term"
   where
     f x (List :> ts) = x :> ts
     f x t            = x :>> t
 
 parseToken :: Parser PTerm
-parseToken = spaces >> choice [parseSymbol, parseList, parseTuple] <* spaces
+parseToken = (try $ spaces >> choice [parseSymbol, parseList, parseTuple] <* spaces) <?> "Token"
 
 parseList :: Parser PTerm
-parseList = (List :>) <$> between (char '[') (char ']') (sepBy parsePTerm (char ','))
+parseList = (try $ (List :>) <$> between (char '[') (char ']') (sepBy parsePTerm (char ','))) <?> "List"
 
 parseTuple :: Parser PTerm
-parseTuple = (List :>) <$> between (char '(') (char ')') (sepBy parsePTerm (char ','))
+parseTuple = (try $ (List :>) <$> between (char '(') (char ')') (sepBy parsePTerm (char ','))) <?> "Tuple"
 
 parseNot :: Parser PTerm
-parseNot = pNot <$> parseToken
+parseNot = try $ pNot <$> (string "no" >> parseToken)
 
 pNot :: PTerm -> PTerm
 pNot (Not    :> [t]) = t
@@ -133,7 +147,7 @@ pNot (NEqual :> ts)  = Equal :> ts
 pNot t               = Not :> [t]
 
 parseAnd :: Parser PTerm
-parseAnd = pAnd <$> sepBy parseToken (string "and")
+parseAnd = try $ pAnd <$> sepBy parseToken (string "and")
 
 pAnd :: [PTerm] -> PTerm
 pAnd [] = T (B True)
@@ -149,7 +163,7 @@ pAnd (t:s) = And :> case (t, pAnd s) of
   (x, y)                 -> [x, y]
 
 parseOr :: Parser PTerm
-parseOr = pOr <$> sepBy parseToken (string "or")
+parseOr = try $ pOr <$> sepBy parseToken (string "or")
 
 pOr :: [PTerm] -> PTerm
 pOr [] = T (B False)
@@ -165,19 +179,19 @@ pOr (t:s) = Or :> case (t, pOr s) of
   (x, y)               -> [x, y]
 
 parseEqual :: Parser PTerm
-parseEqual = liftM2 (\x y -> Equal :> [x,y]) parseToken (string "eq" >> parseToken)
+parseEqual = try $ liftM2 (\x y -> Equal :> [x,y]) parseToken (string "eq" >> parseToken)
 
 parseNEqual :: Parser PTerm
-parseNEqual = liftM2 (\x y -> NEqual :> [x,y]) parseToken (string "ne" >> parseToken)
+parseNEqual = try $ liftM2 (\x y -> NEqual :> [x,y]) parseToken (string "ne" >> parseToken)
 
 parseIn :: Parser PTerm
-parseIn = liftM2 (\x y -> In :> [x,y]) parseToken (string "in" >> parseToken)
+parseIn = try $ liftM2 (\x y -> In :> [x,y]) parseToken (string "in" >> parseToken)
 
 parseArgs :: Parser PTerm
-parseArgs = (\x -> Args :> [x]) <$> parseToken
+parseArgs = try $ (\x -> Args :> [x]) <$> (string "args" >> parseToken)
 
 parseReplace :: Parser PTerm
-parseReplace = (Replace :>) <$> (string "replace" >> count 2 parseToken)
+parseReplace = try $ (Replace :>) <$> (string "replace" >> count 2 parseToken)
 
 parsePrefix :: Parser PTerm
 parsePrefix = choice [parseNot, parseIn, parseArgs, parseReplace]
@@ -190,7 +204,7 @@ parseKeyword = choice [parsePrefix, parseInfix]
 
 -- | Parse a program term
 parsePTerm :: Parser PTerm
-parsePTerm = spaces >> choice [parseKeyword, parseTerm, parseToken] <* spaces
+parsePTerm = echo "Parse program term" >> spaces >> choice [parseKeyword, parseTerm, parseToken] <* spaces
 
 parseDo :: Parser Program
 parseDo = string "do" >> parseProgram
@@ -206,17 +220,19 @@ parseWhere = pAnd . reverse <$> option [] (string "where" >> f [])
 -- | Parse an assigning instruction
 parseAssign :: Parser Program
 parseAssign = do
-  pat <- parsePTerm <* (string "=" <|> string "<-")
+  echo "Parse assign statement"
+  pat <- echo "11111" >> parsePTerm <* echo "22222" <* (string "=" <|> string "<-") <* echo "33333"
+  echo "Assign 2"
   liftM3 (Assign pat) parsePTerm parseWhere parseProgram
 
 -- | Parse a branching instruction
 parseBranch :: Parser Program
-parseBranch = liftM3 Branch (string "if" >> parsePTerm) parseDo parseProgram
+parseBranch = echo "Parse branch statement" >> liftM3 Branch (string "if" >> parsePTerm) parseDo parseProgram
 
 -- | Parse a switching instruction
 parseSwitch :: Parser Program
 parseSwitch = do
-  expr <- string "case" >> parsePTerm <* string "of"
+  expr <- string "case" >> echo "WWW" >> parsePTerm <* string "of"
   cond <- parseWhere
   cases <- many1 (liftM2 (,) parsePTerm parseDo)
   Switch expr cond cases <$> parseProgram

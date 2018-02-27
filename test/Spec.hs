@@ -13,23 +13,26 @@ import           System.IO
 import           Global
 import           LSymbol
 import           Program
+import           Program.Database
 import           Program.Parser
+import           Program.Writer
 
 -- | Test implementation
-test :: Integer -> IO Bool
+test :: Integer -> Global Bool
 test num = case num of
-  1 -> make $ do
-    lsym_db <- load "database/lsymbols.db"
-    prog_str <- liftIO $ readFile "database/programs/before.coral"
-    let prog = parse prog_str lsym_db :: Program
-    liftIO $ writeFile "database/programs/after.coral" (write prog lsym_db)
+  1 -> do
+    load "database/lsymbols.db" >>= setLSymbols
+    let file = "database/programs/before.coral"
+    prog_str <- liftIO $ readFile file
+    prog :: Program <- parse prog_str file
+    liftIO . writeFile "database/programs/after.coral" =<< write prog
     return True
 
 -- | Run test with number num
 runTest :: Integer -> IO ()
 runTest num = do
   putStr (show num ++ " ... ")
-  res <- test num
+  res <- make (test num)
   if res then putStrLn "ok" else putStrLn "fail"
 
 main :: IO ()

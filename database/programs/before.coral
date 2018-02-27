@@ -1,4 +1,4 @@
-case t0 of
+case st0 of
   theorem [t1]
   do
     case t1 of
