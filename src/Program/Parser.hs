@@ -196,7 +196,12 @@ parseDo :: Parser Program
 parseDo = string "do" >> parseProgram
 
 parseWhere :: Parser PTerm
-parseWhere = pAnd <$> option [] (string "where" >> many1 parsePTerm)
+parseWhere = pAnd . reverse <$> option [] (string "where" >> f [])
+  where
+    f :: [PTerm] -> Parser [PTerm]
+    f ts = do
+      t <- parsePTerm
+      ((try . lookAhead) parseAssign >> return (t:ts)) <|> f (t:ts)
 
 -- | Parse an assigning instruction
 parseAssign :: Parser Program
