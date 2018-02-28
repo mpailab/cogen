@@ -54,12 +54,11 @@ instance (LSymbol.Base m, Program.Base m, MonadIO m) => Database String Programs
          f file = do
            db <- getPrograms
            lsym_db <- getLSymbols
+           Just lsym <- (getLSymbol . read . takeBaseName) file
            content <- liftIO (try (readFile file) :: IO (Either IOError FilePath))
            case content of
               Left _        -> return ()
-              Right content -> join $ liftM2 addProgram
-                                             (getLSymbol (read $ takeBaseName file))
-                                             (parse content file)
+              Right content -> addProgram lsym =<< parse content file
 
   -- | Save a database of programs to a given directory
   save db dir = do

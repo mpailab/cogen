@@ -28,6 +28,7 @@ module LSymbol
       getLSymbol,
       getLSymbols,
       initLSymbols,
+      listLSymbols,
       LSymbol,
       LSymbols,
       LTerm,
@@ -93,13 +94,16 @@ class Monad m => Base m where
   newLSymbols :: m LSymbols
   newLSymbols = let db = initLSymbols in setLSymbols db >> return db
 
+  listLSymbols :: m [String]
+  listLSymbols = getLSymbols >>= return . (map name_) . elems . fst
+
   -- | Get the name of a logical symbol
   nameLSymbol :: LSymbol -> m String
   nameLSymbol (S n) = getLSymbols >>= \db -> return (name_ $ fst db ! n)
 
   -- | Get a logical symbol by the name or synonym
-  getLSymbol :: String -> m LSymbol
-  getLSymbol str = fromJust . M.lookup str . snd <$> getLSymbols
+  getLSymbol :: String -> m (Maybe LSymbol)
+  getLSymbol str = M.lookup str . snd <$> getLSymbols
 
   -- | Add a new logical symbol defined by 'info' to a database
   addLSymbol :: String   -- ^ name

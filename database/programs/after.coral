@@ -1,10 +1,10 @@
-case t0 of
-  theorem [t1]
+case t1 of
+  theorem [t2]
   do
-    case t1 of
-      forall [boundVariables t2, premises t3, conclusion [t4]]
+    case t2 of
+      forall [boundVariables t3, premises t4, conclusion [t5]]
       do
-        t7 [t5, t6] = t4 where t7 in [equality, equivalence]
+        t6 [t7, t8] <- t5 where t6 in [equality, equivalence]
         done
     done
 done

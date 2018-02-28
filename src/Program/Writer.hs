@@ -45,21 +45,6 @@ instance Write Program where
 ------------------------------------------------------------------------------------------
 -- Functions
 
--- | Show instance for program symbols
-instance Show PSymbol where
-  show (X i)     = 't' : show i
-  show (I i)     = show i
-  show (B True)  = "True"
-  show (B False) = "False"
-  show Not       = "no"
-  show And       = "and"
-  show Or        = "or"
-  show Equal     = "eq"
-  show NEqual    = "ne"
-  show In        = "in"
-  show Args      = "args"
-  show Replace   = "replace"
-
 -- | Write a program symbol
 writePSymbol :: LSymbol.Base m => PSymbol -> m String
 writePSymbol (S s) = nameLSymbol s

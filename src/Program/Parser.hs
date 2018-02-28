@@ -78,10 +78,12 @@ instance Parse Program where
 
 errorToString :: ParseError -> String
 errorToString err = "Program parser error:\n"
-  ++ file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")\n"
+  ++ showPos (errorPos err) ++ "\n"
   ++ (unlines . map messageString . errorMessages) err
+
+showPos :: SourcePos -> String
+showPos pos = file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")"
   where
-    pos = errorPos err
     file = sourceName pos
     i = sourceLine pos
     j = sourceColumn pos
@@ -90,7 +92,7 @@ errorToString err = "Program parser error:\n"
 -- Functions
 
 word :: Parser String
-word = try $ (many1 $ (choice [alphaNum, oneOf "_-"] <?> "QQQ")) >>= \x -> echo ("word : " ++ x ++ "\n") >> return x
+word = many1 (choice [alphaNum, oneOf "_-"]) >>= \x -> echo x >> return x
 
 addVar :: String -> Info -> Info
 addVar name info =
@@ -100,45 +102,70 @@ addVar name info =
 
 parseVar :: Parser PSymbol
 parseVar = do
-  name <- word <?> "can't parse a name of variable"
-  info <- getState
-  case M.lookup name (locals info) of
-    Just n -> return (X n)
-    _      -> modifyState (addVar name) >> return (X (varnum info))
+  getPosition >>= echo . (\x -> "parseVar" ++ " : " ++ x) . showPos
+  w <- lookAhead word
+  echo ("word \"" ++ w ++ "\" is " ++ (if isKeyword w then "" else "not ") ++ "keyword")
+  if isKeyword w
+    then parserZero
+    else do
+      name <- word
+      echo "1"
+      info <- getState
+      case M.lookup name (locals info) of
+        Just n -> return (X n)
+        _      -> modifyState (addVar name) >> return (X (varnum info))
 
 parseInt :: Parser PSymbol
-parseInt = try ((I . read) <$> many1 digit) <?> "can't parse an integer"
+parseInt = getPosition >>= echo . (\x -> "parseInt" ++ " : " ++ x) . showPos >>
+  (I . read) <$> many1 digit
 
 parseBool :: Parser PSymbol
-parseBool = try $ (I . read) <$> (string "True" <|> string "False")
+parseBool = getPosition >>= echo . (\x -> "parseBool" ++ " : " ++ x) . showPos >>
+  (I . read) <$> (string "True" <|> string "False")
 
 parseLSymbol :: Parser PSymbol
-parseLSymbol = (try $ S <$> (getLSymbol =<< word)) <?> "LSymbol"
+parseLSymbol = do
+  getPosition >>= echo . (\x -> "parseLSymbol" ++ " : " ++ x) . showPos
+  w <- lookAhead word
+  is_sym <- checkLSymbol w
+  echo ("word \"" ++ w ++ "\" is " ++ (if is_sym then "" else "not ") ++ "lsymbol")
+  if is_sym
+    then (S . fromJust) <$> (word >>= getLSymbol)
+    else parserZero
 
 -- | Parse a program symbol
 parsePSymbol :: Parser PSymbol
-parsePSymbol = choice [parseInt, parseBool, parseLSymbol, parseVar] <?> "PSymbol"
+parsePSymbol = getPosition >>= echo . (\x -> "parsePSymbol" ++ " : " ++ x) . showPos >>
+  (try parseInt <|> try parseBool <|> try parseLSymbol <|> try parseVar <?> "PSymbol")
 
 parseSymbol :: Parser PTerm
-parseSymbol = (try $ T <$> parsePSymbol) <?> "Symbol"
+parseSymbol = getPosition >>= echo . (\x -> "parseSymbol" ++ " : " ++ x) . showPos >>
+  T <$> parsePSymbol
 
 parseTerm :: Parser PTerm
-parseTerm = (try $ liftM2 f (choice [parseLSymbol, parseVar]) parseToken) <?> "Term"
-  where
-    f x (List :> ts) = x :> ts
-    f x t            = x :>> t
+parseTerm = getPosition >>= echo . (\x -> "parseTerm" ++ " : " ++ x) . showPos >>
+  do
+    s <- try parseLSymbol <|> try parseVar <?> "Term"
+    t <- parseToken
+    case t of
+      List :> ts -> return (s :> ts)
+      _          -> return (s :>> t)
 
 parseToken :: Parser PTerm
-parseToken = (try $ spaces >> choice [parseSymbol, parseList, parseTuple] <* spaces) <?> "Token"
+parseToken = getPosition >>= echo . (\x -> "parseToken" ++ " : " ++ x) . showPos >>
+  spaces >> (try parseSymbol <|> try parseList <|> try parseTuple <?> "Token") <* spaces
 
 parseList :: Parser PTerm
-parseList = (try $ (List :>) <$> between (char '[') (char ']') (sepBy parsePTerm (char ','))) <?> "List"
+parseList = getPosition >>= echo . (\x -> "parseList" ++ " : " ++ x) . showPos >>
+  (List :>) <$> between (char '[') (char ']') (sepBy parsePTerm (char ','))
 
 parseTuple :: Parser PTerm
-parseTuple = (try $ (List :>) <$> between (char '(') (char ')') (sepBy parsePTerm (char ','))) <?> "Tuple"
+parseTuple = getPosition >>= echo . (\x -> "parseTuple" ++ " : " ++ x) . showPos >>
+  (List :>) <$> between (char '(') (char ')') (sepBy parsePTerm (char ','))
 
 parseNot :: Parser PTerm
-parseNot = try $ pNot <$> (string "no" >> parseToken)
+parseNot = getPosition >>= echo . (\x -> "parseNot" ++ " : " ++ x) . showPos >>
+  pNot <$> (string "no" >> parseToken)
 
 pNot :: PTerm -> PTerm
 pNot (Not    :> [t]) = t
@@ -146,8 +173,15 @@ pNot (Equal  :> ts)  = NEqual :> ts
 pNot (NEqual :> ts)  = Equal :> ts
 pNot t               = Not :> [t]
 
+infixOper :: String -> Parser PTerm -> Parser [PTerm]
+infixOper oper p = do
+  x <- p
+  xs <- many1 (string oper >> p)
+  return (x:xs)
+
 parseAnd :: Parser PTerm
-parseAnd = try $ pAnd <$> sepBy parseToken (string "and")
+parseAnd = getPosition >>= echo . (\x -> "parseAnd" ++ " : " ++ x) . showPos >>
+  pAnd <$> infixOper "and" parseToken
 
 pAnd :: [PTerm] -> PTerm
 pAnd [] = T (B True)
@@ -163,7 +197,8 @@ pAnd (t:s) = And :> case (t, pAnd s) of
   (x, y)                 -> [x, y]
 
 parseOr :: Parser PTerm
-parseOr = try $ pOr <$> sepBy parseToken (string "or")
+parseOr = getPosition >>= echo . (\x -> "parseOr" ++ " : " ++ x) . showPos >>
+  pOr <$> infixOper "or" parseToken
 
 pOr :: [PTerm] -> PTerm
 pOr [] = T (B False)
@@ -179,60 +214,72 @@ pOr (t:s) = Or :> case (t, pOr s) of
   (x, y)               -> [x, y]
 
 parseEqual :: Parser PTerm
-parseEqual = try $ liftM2 (\x y -> Equal :> [x,y]) parseToken (string "eq" >> parseToken)
+parseEqual = getPosition >>= echo . (\x -> "parseEqual" ++ " : " ++ x) . showPos >>
+  liftM2 (\x y -> Equal :> [x,y]) parseToken (string "eq" >> parseToken)
 
 parseNEqual :: Parser PTerm
-parseNEqual = try $ liftM2 (\x y -> NEqual :> [x,y]) parseToken (string "ne" >> parseToken)
+parseNEqual = getPosition >>= echo . (\x -> "parseNEqual" ++ " : " ++ x) . showPos >>
+  liftM2 (\x y -> NEqual :> [x,y]) parseToken (string "ne" >> parseToken)
 
 parseIn :: Parser PTerm
-parseIn = try $ liftM2 (\x y -> In :> [x,y]) parseToken (string "in" >> parseToken)
+parseIn = getPosition >>= echo . (\x -> "parseIn" ++ " : " ++ x) . showPos >>
+  liftM2 (\x y -> In :> [x,y]) parseToken (string "in" >> parseToken)
 
 parseArgs :: Parser PTerm
-parseArgs = try $ (\x -> Args :> [x]) <$> (string "args" >> parseToken)
+parseArgs = getPosition >>= echo . (\x -> "parseArgs" ++ " : " ++ x) . showPos >>
+  (\x -> Args :> [x]) <$> (string "args" >> parseToken)
 
 parseReplace :: Parser PTerm
-parseReplace = try $ (Replace :>) <$> (string "replace" >> count 2 parseToken)
+parseReplace = getPosition >>= echo . (\x -> "parseReplace" ++ " : " ++ x) . showPos >>
+  (Replace :>) <$> (string "replace" >> count 2 parseToken)
 
 parsePrefix :: Parser PTerm
-parsePrefix = choice [parseNot, parseIn, parseArgs, parseReplace]
+parsePrefix = getPosition >>= echo . (\x -> "parsePrefix" ++ " : " ++ x) . showPos >>
+  (try parseNot <|> try parseIn <|> try parseArgs <|> try parseReplace <?> "Prefix")
 
 parseInfix :: Parser PTerm
-parseInfix = choice [parseAnd, parseOr, parseEqual, parseNEqual]
+parseInfix = getPosition >>= echo . (\x -> "parseInfix" ++ " : " ++ x) . showPos >>
+  (try parseAnd <|> try parseOr <|> try parseEqual <|> try parseNEqual <?> "Infix")
 
 parseKeyword :: Parser PTerm
-parseKeyword = choice [parsePrefix, parseInfix]
+parseKeyword = getPosition >>= echo . (\x -> "parseKeyword" ++ " : " ++ x) . showPos >>
+  (try parsePrefix <|> try parseInfix <?> "Keyword")
 
 -- | Parse a program term
 parsePTerm :: Parser PTerm
-parsePTerm = echo "Parse program term" >> spaces >> choice [parseKeyword, parseTerm, parseToken] <* spaces
+parsePTerm = getPosition >>= echo . (\x -> "parsePTerm" ++ " : " ++ x) . showPos >>
+  spaces >> (try parseKeyword <|> try parseTerm <|> try parseToken <?> "PTerm") <* spaces
 
 parseDo :: Parser Program
-parseDo = string "do" >> parseProgram
+parseDo = getPosition >>= echo . (\x -> "parseDo" ++ " : " ++ x) . showPos >>
+  string "do" >> parseProgram
 
 parseWhere :: Parser PTerm
-parseWhere = pAnd . reverse <$> option [] (string "where" >> f [])
+parseWhere = getPosition >>= echo . (\x -> "parseWhere" ++ " : " ++ x) . showPos >>
+  pAnd . reverse <$> option [] (string "where " >> f [])
   where
     f :: [PTerm] -> Parser [PTerm]
     f ts = do
       t <- parsePTerm
-      ((try . lookAhead) parseAssign >> return (t:ts)) <|> f (t:ts)
+      (lookAhead parseAssign >> return (t:ts)) <|> f (t:ts) <|> return (t:ts)
 
 -- | Parse an assigning instruction
 parseAssign :: Parser Program
 parseAssign = do
-  echo "Parse assign statement"
-  pat <- echo "11111" >> parsePTerm <* echo "22222" <* (string "=" <|> string "<-") <* echo "33333"
-  echo "Assign 2"
+  getPosition >>= echo . (\x -> "parseAssign" ++ " : " ++ x) . showPos
+  pat <- parsePTerm <* (string "= " <|> string "<- ")
   liftM3 (Assign pat) parsePTerm parseWhere parseProgram
 
 -- | Parse a branching instruction
 parseBranch :: Parser Program
-parseBranch = echo "Parse branch statement" >> liftM3 Branch (string "if" >> parsePTerm) parseDo parseProgram
+parseBranch = getPosition >>= echo . (\x -> "parseBranch" ++ " : " ++ x) . showPos >>
+  liftM3 Branch (string "if " >> parsePTerm) parseDo parseProgram
 
 -- | Parse a switching instruction
 parseSwitch :: Parser Program
 parseSwitch = do
-  expr <- string "case" >> echo "WWW" >> parsePTerm <* string "of"
+  getPosition >>= echo . (\x -> "parseSwitch" ++ " : " ++ x) . showPos
+  expr <- string "case " >> parsePTerm <* string "of"
   cond <- parseWhere
   cases <- many1 (liftM2 (,) parsePTerm parseDo)
   Switch expr cond cases <$> parseProgram
@@ -240,16 +287,22 @@ parseSwitch = do
 -- | Parse an acting instruction
 parseAction :: Parser Program
 parseAction = do
+  getPosition >>= echo . (\x -> "parseAction" ++ " : " ++ x) . showPos
   act <- parsePTerm
   liftM2 (Action act) parseWhere parseProgram
 
 -- | Parse an empty instruction
 parseEmpty :: Parser Program
-parseEmpty = string "done" >> return Program.Empty
-addWhere [] = []
+parseEmpty = getPosition >>= echo . (\x -> "parseEmpty" ++ " : " ++ x) . showPos >>
+  string "done" >> return Program.Empty
 
 -- | Parse a program fragment
 parseProgram :: Parser Program
-parseProgram = spaces >>
-  choice [parseAssign, parseBranch, parseSwitch, parseAction, parseEmpty] <*
-  spaces
+parseProgram = getPosition >>= echo . (\x -> "parseProgram" ++ " : " ++ x) . showPos >>
+  spaces >> (
+  try parseAssign <|>
+  try parseBranch <|>
+  try parseSwitch <|>
+  try parseAction <|>
+  try parseEmpty      <?> "Program"
+  ) <* spaces

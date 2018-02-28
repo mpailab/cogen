@@ -28,6 +28,7 @@ module Program
       getProgram,
       getPrograms,
       initPrograms,
+      isKeyword,
       newPrograms,
       Program(..),
       Programs,
@@ -68,6 +69,25 @@ data PSymbol = X Int                    -- ^ program variable
              | Args                     -- ^ arguments of term
              | Replace                  -- !
              deriving (Eq, Ord)
+
+-- | Show instance for program symbols
+instance Show PSymbol where
+  show (X i)     = 't' : show i
+  show (I i)     = show i
+  show (B True)  = "True"
+  show (B False) = "False"
+  show Not       = "no"
+  show And       = "and"
+  show Or        = "or"
+  show Equal     = "eq"
+  show NEqual    = "ne"
+  show In        = "in"
+  show Args      = "args"
+  show Replace   = "replace"
+
+keywords :: [String]
+keywords = ["do", "done", "if", "case", "of", "where"]
+  ++ map show [Not, And, Or, Equal, NEqual, In, Args, Replace]
 
 keywordsAction :: [PSymbol]
 keywordsAction = [Replace]
@@ -141,8 +161,8 @@ class Monad m => Base m where
   newPrograms = let db = initPrograms in setPrograms db >> return db
 
   -- | Get the program of logical symbol
-  getProgram :: LSymbol -> m Program
-  getProgram s = (fromJust . M.lookup s) <$> getPrograms
+  getProgram :: LSymbol -> m (Maybe Program)
+  getProgram s = M.lookup s <$> getPrograms
 
   -- | Add a program of logical symbol to a database
   addProgram :: LSymbol -> Program -> m ()
@@ -154,3 +174,6 @@ class Monad m => Base m where
 -- | Does a program term correspond to an action
 isAction :: PTerm -> Bool
 isAction (x :> _) = x `elem` keywordsAction
+
+isKeyword :: String -> Bool
+isKeyword x = x `elem` keywords

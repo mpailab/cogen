@@ -25,9 +25,9 @@ import           Debug.Trace
 
 -- Internal imports
 
-echo :: Applicative f => String -> f ()
-echo = traceM
--- echo x = return ()
+echo :: Monad f => String -> f ()
+-- echo = traceM
+echo x = return ()
 
 infixr 5 +>+
 (+>+) :: Monad m => String -> m String -> m String
