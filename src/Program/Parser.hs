@@ -43,7 +43,8 @@ data Info = Info
   {
     lsymbols :: LSymbols,
     locals   :: M.Map String Int,
-    varnum   :: Int
+    varnum   :: Int,
+    indnum   :: Int
   }
 
 type Parser = GenParser Info
@@ -55,24 +56,10 @@ instance LSymbol.Base Parser where
 class Parse a where
   parse :: LSymbol.Base m => String -> String -> m a
 
--- | Parse instance for program symbols
-instance Parse PSymbol where
-  parse str source = getLSymbols >>= \db ->
-    case runParser parsePSymbol (Info db M.empty 1) source (Text.pack str) of
-      Right s   -> return s
-      Left  err -> (error . errorToString) err
-
--- | Parse instance for program terms
-instance Parse PTerm where
-  parse str source = getLSymbols >>= \db ->
-    case runParser parsePTerm (Info db M.empty 1) source (Text.pack str) of
-      Right t   -> return t
-      Left  err -> (error . errorToString) err
-
 -- | Parse instance for programs
 instance Parse Program where
   parse str source = getLSymbols >>= \db ->
-    case runParser parseProgram (Info db M.empty 1) source (Text.pack str) of
+    case runParser parseProgram (Info db M.empty 1 0) source (Text.pack str) of
       Right p   -> return p
       Left  err -> (error . errorToString) err
 
@@ -91,14 +78,26 @@ showPos pos = file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")"
 ------------------------------------------------------------------------------------------
 -- Functions
 
-word :: Parser String
-word = many1 (choice [alphaNum, oneOf "_-"]) >>= \x -> echo x >> return x
-
-addVar :: String -> Info -> Info
-addVar name info =
+addVar :: String -> Parser PSymbol
+addVar name = getState >>= \info ->
   let n = varnum info
       l = locals info
-  in info {varnum = n + 1, locals = M.insert name n l}
+  in modifyState (\i -> i {varnum = n + 1, locals = M.insert name n l}) >> return (X n)
+
+incrIndent :: Parser ()
+incrIndent = modifyState (\i -> i {indnum = indnum + 1})
+
+decrIndent :: Parser ()
+decrIndent = modifyState (\i -> i {indnum = if indnum == 0 then 0 else indnum - 1})
+
+indent :: Parser ()
+indent = getState >>= \info -> count (indnum info) (char ' ') >> return ()
+
+tailOfLine :: Parser ()
+tailOfLine = many (char ' ') >> endOfLine
+
+word :: Parser String
+word = many1 (choice [alphaNum, oneOf "_-"]) >>= \x -> echo x >> return x
 
 parseVar :: Parser PSymbol
 parseVar = do
@@ -113,7 +112,7 @@ parseVar = do
       info <- getState
       case M.lookup name (locals info) of
         Just n -> return (X n)
-        _      -> modifyState (addVar name) >> return (X (varnum info))
+        _      -> addVar name
 
 parseInt :: Parser PSymbol
 parseInt = getPosition >>= echo . (\x -> "parseInt" ++ " : " ++ x) . showPos >>
@@ -261,7 +260,7 @@ parseWhere = getPosition >>= echo . (\x -> "parseWhere" ++ " : " ++ x) . showPos
     f :: [PTerm] -> Parser [PTerm]
     f ts = do
       t <- parsePTerm
-      (lookAhead parseAssign >> return (t:ts)) <|> f (t:ts) <|> return (t:ts)
+      (lookAhead (parseAssign) >> return (t:ts)) <|> f (t:ts) <|> return (t:ts)
 
 -- | Parse an assigning instruction
 parseAssign :: Parser Program
@@ -298,11 +297,10 @@ parseEmpty = getPosition >>= echo . (\x -> "parseEmpty" ++ " : " ++ x) . showPos
 
 -- | Parse a program fragment
 parseProgram :: Parser Program
-parseProgram = getPosition >>= echo . (\x -> "parseProgram" ++ " : " ++ x) . showPos >>
-  spaces >> (
+parseProgram = indent >> (
   try parseAssign <|>
   try parseBranch <|>
   try parseSwitch <|>
   try parseAction <|>
   try parseEmpty      <?> "Program"
-  ) <* spaces
+  ) <* incrIndent

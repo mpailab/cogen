@@ -5,6 +5,7 @@ case st0 of
       forall [boundVariables t2, premises t3, conclusion [t4]]
       do
         t7 [t5, t6] = t4 where t7 in [equality, equivalence]
+          t5 eq t6
         done
     done
 done
