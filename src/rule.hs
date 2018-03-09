@@ -18,6 +18,7 @@ module Rule
     ) where
 
 -- Internal imports
+import           LSymbol
 import           Term
 
 -- Inference rule

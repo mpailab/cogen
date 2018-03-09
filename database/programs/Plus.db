@@ -1,0 +1,9 @@
+Equal[Header[$p1],Equal]
+  $p2 <- Operands[$p1] | Equal[Header[$p2],Plus]
+  $p3 <- Operands[$p2] | LTrue
+  $p4 <- Operands[$p2] | Neg[Equal[$p4,$p3]]
+  $p5 <- Operands[$p1] | And[Neg[Equal[$p5,$p2]],Equal[Header[$p5],Plus]]
+  $p6 <- Operands[$p5] | Equal[Header[$p6],Neg]
+  $p7 <- Operands[$p6] | Equal[$p3,$p7]
+  $p8 <- Operands[$p5] | Neg[Equal[$p8,$p6]]
+  Replacing[Equal[$p4,Neg[$p8]]]

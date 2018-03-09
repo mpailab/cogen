@@ -8,7 +8,7 @@ Maintainer  : sample@email.com
 Stability   : experimental
 Portability : POSIX
 
-Модуль содержит реализацию компилятора приемов.
+Module contains an implementation of the rules compiler
 -}
 module Compiler
     (
@@ -21,49 +21,45 @@ where
 import           Control.Monad
 import           Control.Monad.State
 import           Data.List
+import           Data.List.Utils
+import           Data.Maybe
 
 -- Internal imports
-import           Compiler.Tree
-import           Compiler.Tree.Database
+import           Compiler.Info
+import           Compiler.Program
+import           LSymbol
 import           Rule
 import           Term
 
--- |Type of theorems
-data Theorem
-  -- | Constructor for a replacing theorem
-  = ReplaceTheorem
-    {
-      getBounds   :: [LSymbol], -- ^ a list of bouned variables
-      getPremises :: [Term],    -- ^ a list of premises
-      getFrom     :: Term,      -- ^ a substituted term
-      getTo       :: Term       -- ^ a substituting term
-    }
-  -- | Constructor for another theorems
-  | OtherTheorem
-
--- |Parse a term as the theorem of an inference rule
-parseReplaceTheorem :: Term -> Bool -> Theorem
-parseReplaceTheorem (Fun "forall" t) is_right = ReplaceTheorem bs ps from to
+-- | Parse a term as the theorem of an inference rule
+parseReplaceTheorem :: Term -> Bool -> State Info ()
+parseReplaceTheorem (Forall :> ts) is_right = do
+  let (bs, ps, from, to) = parse ts
+  addInfoUnit Bounds bs
+  addInfoUnit Premises ps
+  addInfoUnit From from
+  addInfoUnit To to
   where
-    (bs, ps, from, to) = parse t
-
     -- Parse a list of terms as the replacing theorem
-    parse :: [Term] -> ([LSymbol], [Term], Term, Term)
+    parse :: [Term] -> ([LSymbol], -- ^ a list of bouned variables
+                        [Term],    -- ^ a list of premises
+                        Term,      -- ^ a substituted term
+                        Term)      -- ^ a substituting term
 
     -- Parse a bounded variable
     parse (Var x : s) = let (bs, ps, from, to) = parse s in (x:bs, ps, from, to)
 
     -- Switch to a list of premises
-    parse (Const "if" : s) = parse s
+    parse (Const If : s) = parse s
 
     -- Switch to a conclusion
-    parse (Const "then" : s) = parse s
+    parse (Const Then : s) = parse s
 
     -- Parse a conclusion
-    parse (Fun "equal" [from, to] : s) = if is_right
+    parse (Equal :> [from, to] : s) = if is_right
       then ([], [], from, to)
       else ([], [], to, from)
-    parse (Fun "ekvivalentno" [from, to] : s) = if is_right
+    parse (Equivalence :> [from, to] : s) = if is_right
       then ([], [], from, to)
       else ([], [], to, from)
 
@@ -72,131 +68,157 @@ parseReplaceTheorem (Fun "forall" t) is_right = ReplaceTheorem bs ps from to
 
     parse [] = error "Failed theorem conclusion"
 
--- |Get a theorem for an inference rule
-getTheorem :: Rule -> Theorem
-getTheorem rule = case Rule.header rule of
-  Const "firstsubterm"  -> parseReplaceTheorem (theorem rule) False
-  Const "secondsubterm" -> parseReplaceTheorem (theorem rule) True
-  _                     -> OtherTheorem
+-- | Parse the theorem of inference rule
+parseTheorem :: State Info ()
+parseTheorem = do
+  rule <- getRule
+  case Rule.header rule of
+    Const LeftToRight -> parseReplaceTheorem (theorem rule) True
+    Const RightToLeft -> parseReplaceTheorem (theorem rule) False
 
--- |Type of filters depending on its usage
-data FiltersRank = FiltersRank
-  {
-    getUncondFilters  :: [Term], -- ^ list of filters which does not depend on theorem variables
-    getContextFilters :: [Term], -- ^ list of filters containing the logical symbol 'kontekst'
-    otherFilters      :: [Term]  -- ^ list of another filters
-  }
+-- | Modify the theorem of inference rule
+modifyTheorem :: State Info ()
+modifyTheorem = modify id
 
--- | Does a term represent an unconditional filter
-isUncondFilter :: Term -> Bool
-isUncondFilter t = case t of
-  Fun "scanLevel" [Const "one"] -> True
-  _                             -> False
+-- | Bind the theorem of inference rule to a logical symbol
+bindTheorem :: State Info ()
+bindTheorem = do
+  rule <- getRule
+  addInfoUnit BindSymbol (symbol rule)
 
--- |Get a ranked filters for a rule
-rankFilters :: Rule -> IO FiltersRank
-rankFilters rule = do
-  let (cfs, fs)  = partition (`isContainLSymbol` "kontekst") (filters rule)
-  let (ufs, ofs) = partition isUncondFilter fs
-  return (FiltersRank ufs cfs ofs)
+-- | Prepare the theorem of inference rule
+prepTheorem :: State Info ()
+prepTheorem = parseTheorem >> modifyTheorem >> bindTheorem
 
--- |Type of specifiers depending on its usage
-data SpecifiersRank = SpecifiersRank
-  {
-    simple            :: [Term],
-    unknownSpecifiers :: [Term]
-  }
+-- | Prepare the filters of inference rule
+prepFilters :: State Info ()
+prepFilters = modify id
 
--- |Get a ranked specifiers for a rule
-rankSpecifiers :: Rule -> IO SpecifiersRank
-rankSpecifiers rule = return (SpecifiersRank [] [])
-
--- |Type of decision programs
-data Program
-  -- | Constructor for an identifying program
-  = IdentProgram   { commands :: [Term], varsMap :: [(LSymbol, LSymbol)] }
-  -- | Condtructor for a program of filters
-  | FilterProgram  { commands :: [Term], varsMap :: [(LSymbol, LSymbol)] }
-  -- | Condtructor for a checking program
-  | CheckProgram   { commands :: [Term] }
-  -- | Condtructor for a replacing program
-  | ReplaceProgram { commands :: [Term] }
-  -- | Condtructor for an empty program
-  | EmptyProgram   { commands :: [Term] }
-
--- | Type of program information
-data ProgInfo = ProgInfo
-  {
-    getTerms  :: [Term], -- ^ list of program terms
-    getVarNum :: Int     -- ^ number of first free program variable
-  }
+-- | Prepare the specifiers of inference rule
+prepSpecifiers :: State Info ()
+prepSpecifiers = modify id
 
 -- | Identify a term
-identTerm :: Term                 -- ^ theorem's term
-          -> Term                 -- ^ program term
-          -> State ProgInfo Bool  -- ^ return value and info
+identTerm :: Term          -- ^ theorem's term
+          -> Int           -- ^ number of program variable of the term
+          -> State Info () -- ^ information structure
 
 -- Case of theorem's variable
-identTerm (Var _) _ = return True
+identTerm (Var x) n = do
+  mb_m <- getInfoUnit x
+  if isJust mb_m
+    then let m = fromJust mb_m
+         in addProgChunk (Branch [m, n] (Equal :> [Var $ P m, Var $ P n]) Empty Empty)
+    else addInfoUnit x n
 
 -- General case
-identTerm tt pt  = do
-  info <- get
-  let st = Fun "equal" [Fun "symbol" [pt], Const (elementName (Term.header tt))]
-  let new_info = ProgInfo (getTerms info ++ [st]) (getVarNum info)
-  let (res, info) = foldr f (True, new_info) (operands tt)
-  put info
-  return res
+identTerm t n  = do
+  let p = P n
+  let v = Var p
+  addProgChunk (Branch [n] (Equal :> [Header :> [v], Const (Term.header t)]) Empty Empty)
+  foldM_ (\prevs st ->
+    do
+      m <- newProgVarNum
+      addInfoUnit (P m) (Operand :> [v])
+      addProgChunk (Assign [n] m (Operands :> [v]) (cond prevs m) Empty)
+      identTerm st m
+      return (prevs ++ [m]))
+    [] (operands t)
   where
-    -- Identify a subterm of current theorems's term
-    f :: Term -> (Bool, ProgInfo) -> (Bool, ProgInfo)
-    f x (r,i) = (r && nr, ni)
-      where
-        (nr, ni) = runState (identTerm x p) (ProgInfo (getTerms i ++ [o]) (getVarNum i + 1))
-        o = Fun "equal" [p, Fun "operand" [pt]]
-        p = Var ("p" ++ show (getVarNum i))
+    cond []  _ = Const LTrue
+    cond [j] i = Neg :> [Equal :> [Var $ P i, Var $ P j]]
+    cond  s  i = And :> map (\j -> Neg :> [Equal :> [Var $ P i, Var $ P j]]) s
 
--- |Generate an identifying program
-genIdentProg :: Rule -> IO Program
-genIdentProg rule = return (IdentProgram tl [])
-  where
-    tl = getTerms (execState (identTerm (getFrom thrm) pt) info)
-    thrm = getTheorem rule
-    info = ProgInfo [Fun "current_term" [pt]] (i+1)
-    pt = Var ("p" ++ show i)
-    i = 1
+-- | Make an identifying program of inference rule
+makeIdentProg :: State Info ()
+makeIdentProg = do
+  t <- getInfoUnit From
+  identTerm (fromJust t) 1
 
--- |Generate a program of filters
-genFilterProg :: FiltersRank -> Program -> IO Program
-genFilterProg f_rank i_prog = do
-  let fs = getUncondFilters f_rank
-  return (FilterProgram fs [])
+-- | Make a filtering program of inference rule
+makeFilterProg :: State Info ()
+makeFilterProg = modify id
 
--- |Generate a checking program
-genCheckProg :: Rule -> SpecifiersRank -> Program -> Program -> IO Program
-genCheckProg rule s_rank i_prog f_prog = return (CheckProgram [])
+-- | Make a checking program of inference rule
+makeCheckProg :: State Info ()
+makeCheckProg = modify id
 
--- |Generate a replacing program
-genReplaceProg :: Rule -> Program -> Program -> IO Program
-genReplaceProg rule i_prog f_prog = return (ReplaceProgram [Const "replacing"])
+replaceTerm :: Term            -- ^ theorem's term
+            -> [Int]
+            -> State Info (Term, [Int]) -- ^ information structure
 
--- |Generate a decision tree for a rule
-genTree :: Rule -> Program -> Program -> Program -> Program -> IO Tree
-genTree rule i_prog f_prog c_prog r_prog = do
-  let t_node = Terminal (commands r_prog)
-  let br_node_i = Branch [(commands i_prog, t_node)]
-  let br_node_f = Branch [(commands f_prog, br_node_i)]
-  return br_node_f
+-- Case of theorem's variable
+replaceTerm (Var x) s = do
+  mb_n <- getInfoUnit x
+  let n = fromJust mb_n
+  state $ \info -> ((Var $ P n, n:s), info)
 
--- |Compile an inference rule
+-- Case of constant
+replaceTerm t@(Const _) s = state $ \info -> ((t,s), info)
+
+-- General case
+replaceTerm t s = do
+  x <- forM (operands t) (`replaceTerm` s)
+  let (ts,vs) = unzip x
+  state $ \info -> ((Term.header t :> ts, concat vs), info)
+
+-- | Make a replacing program of inference rule
+makeReplaceProg :: State Info ()
+makeReplaceProg = do
+  t <- getInfoUnit To
+  (pt,vs) <- replaceTerm (fromJust t) []
+  addProgChunk (Action (sort $ uniq vs) (Replacing :> [pt]))
+
+linkProgChunks :: [Program] -> State Info Program
+
+linkProgChunks (Assign vl v g c Empty : Branch _ bc Empty Empty : ps) = do
+  let new_c = case c of
+                And :> ts   -> And :> (ts ++ [bc])
+                Const LTrue -> bc
+                _           -> And :> [c, bc]
+  linkProgChunks (Assign vl v g new_c Empty : ps)
+
+linkProgChunks (Assign vl v g c Empty : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Assign vl v g c prog, info)
+
+linkProgChunks (Branch vl c Empty Empty : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Branch vl c prog Empty, info)
+
+linkProgChunks (Switch vl e cl Empty : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Switch vl e cl prog, info)
+
+linkProgChunks (Action vl t : ps) = do
+  prog <- linkProgChunks ps
+  state $ \info -> (Action vl t, info)
+
+linkProgChunks [] = state $ \info -> (Empty, info)
+
+-- | Link program fragments of inference rule
+linkProgram :: State Info (Program, LSymbol)
+linkProgram = do
+  chunks <- getProgChunks
+  prog <- linkProgChunks chunks
+  mb_sym <- getInfoUnit BindSymbol
+  let sym = fromJust mb_sym
+  state $ \info -> ((prog, sym), info)
+
+-- | Make a program of inference rule
+make :: Rule -> State Info (Program, LSymbol) -> (Program, LSymbol)
+make rule = (`evalState` initInfo rule)
+
+-- | Compile an inference rule
 compile :: Rule -> IO ()
 compile rule = do
-  let file = "database/tree.db"
-  f_rank <- rankFilters rule
-  s_rank <- rankSpecifiers rule
-  i_prog <- genIdentProg rule
-  f_prog <- genFilterProg f_rank i_prog
-  c_prog <- genCheckProg rule s_rank i_prog f_prog
-  r_prog <- genReplaceProg rule i_prog f_prog
-  tree <- genTree rule i_prog f_prog c_prog r_prog
-  saveTree (symbol rule) tree file
+  let file = "database/programs"
+  let (prog, sym) = make rule $ do prepFilters
+                                   prepSpecifiers
+                                   prepTheorem
+                                   makeIdentProg
+                                   makeFilterProg
+                                   makeCheckProg
+                                   makeReplaceProg
+                                   linkProgram
+  saveProgram sym prog file

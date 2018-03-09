@@ -15,47 +15,142 @@ Portability : POSIX
 module Term
     (
       -- exports
-      Term, TermTemplate(..), LSymbol, TermReference(..), ITerm(..), ITermList(..), TermElement(..), elementName, (&),
-      replaceTerms, findMatches, hasMatch, parentRefs, equalTerms, isContainLSymbol
+      Term, Tree(..),
+      header, operands, subterms,
+      drawTerm,
+      getVarNum,
+      isContainLSymbol
     )
 where
 
 -- External imports
-import qualified Control.Arrow as Arrow
---import           Control.Monad
-import           Data.List
---import           Data.String
+import           Data.Char
+
+-- Internal imports
+import           LSymbol
+
+data Tree a = Var a
+            | Const a
+            | a :> [Tree a]
+            deriving (Eq, Ord)
+
+instance Foldable Tree where
+  foldMap f (Var v)   = f v
+  foldMap f (Const c) = f c
+  foldMap f (s :> l)  = f s `mappend` foldMap (foldMap f) l
+
+type Term = Tree LSymbol
+
+instance Show Term where
+  show (Var (P x))   = "$p" ++ show x
+  show (Var (X x))   = "$x" ++ show x
+  show (Const (C x)) = show x
+  show (Const x)     = show x
+  show (s :> l)      = show s ++ "[" ++ sumstr (map show l) ++ "]"
+    where
+      sumstr []      = ""
+      sumstr [a]     = a
+      sumstr (x:y:l) = x ++ "," ++ sumstr (y:l)
+
+instance Read Term where
+  readsPrec _ str = do
+    [print (str ++ "\n")]
+    case lex str of
+      ("$",r):_   -> [(Var $ f v, x) | (v,x) <- lex r]
+      (s,'[':r):_ -> [(read s :> ts, x) | (ts,x) <- reads ('[':r)]
+      (s,r):_     -> [(Const $ g s, r)]
+      _           -> []
+    where
+      f str = case str of
+        'x':s -> X $ read s
+        'p':s -> P $ read s
+        s     -> read s
+      g x@(s:r) =
+        if isDigit s
+          then C $ read x
+          else read x
+
+drawTerm :: Term -> String
+drawTerm  = unlines . draw
+
+draw :: Term -> [String]
+draw (Var s)   = lines $ show s
+draw (Const s) = lines $ show s
+draw (s :> l)  = lines (show s) ++ drawSubTerms l
+  where
+    drawSubTerms []     = []
+    drawSubTerms [t]    = "|" : shift "`- " "   " (draw t)
+    drawSubTerms (t:tl) = "|" : shift "+- " "|  " (draw t) ++ drawSubTerms tl
+    shift first other   = zipWith (++) (first : repeat other)
+
+apply :: Fold a => LSymbol -> a
+apply sym = fold sym []
+
+class Fold a where
+  fold :: LSymbol -> [Term] -> a
+
+instance Fold Bool where
+  fold sym tl = apply' sym (reverse tl)
+
+instance Fold Term where
+  fold sym tl = apply' sym (reverse tl)
+
+instance Fold [Term] where
+  fold sym tl = apply' sym (reverse tl)
+
+instance Fold a => Fold (Term -> a) where
+  fold sym tl t = fold sym (t : tl)
+
+class Apply a where
+  apply' :: LSymbol -> [Term] -> a
+
+instance Apply Bool where
+  apply' Equal (t:s:_) = t == s
+
+instance Apply Term where
+  apply' Context _ = Const Context
+
+instance Apply [Term] where
+  apply' Operands (t:_) = operands t
 
 
--- | Default type of functional and variable symbols
-type LSymbol = String
+class ITerm t where
+  header      :: t -> LSymbol         -- ^ returns term header
+  operands    :: t -> [Term]          -- ^ enumerate operands of current term
+  subterms    :: t -> [Term]          -- ^ enumerates subterms of current term
 
--- | term with arbitrary type @f@ of functional symbols and variable symbols
--- | template is necessary for type classes that require a type parameter like Foldable
-data TermTemplate f
-  = Const f                -- ^ constant node (may be used instead of function node with 0 arguments)
-  | Var f                  -- ^ variable node
-  | Fun f [TermTemplate f] -- ^ function node with argument list. Each argument is also a term.
-  deriving (Eq, Ord)
+instance ITerm Term where
 
--- | term with arbitrary functional symbols and variable symbols of type LSymbol
-type Term = TermTemplate LSymbol
+  -- Get header of term
+  header (sym :> _) = sym
 
+  -- Get operands list of term
+  operands (_ :> l) = l
+
+  -- Get subterms list of term
+  subterms t =  t : concatMap subterms (operands t)
+
+class VarNum a where
+  getVarNum :: a -> Int
+
+instance VarNum LSymbol where
+  getVarNum (P n) = n
+  getVarNum (X n) = n
+
+instance VarNum Term where
+  getVarNum (Var x) = getVarNum x
+
+-- | Does a term contain a logical symbol
+isContainLSymbol :: Term -> LSymbol -> Bool
+isContainLSymbol trm sym = any f trm
+  where
+    f x | x == sym = True
+    f _ = False
+
+{-
 -- | 'TermReference' specifies subterm with position in the whole term.
 --    stores current subterm and sequence of parents from current subterm parent to term root
 newtype TermReference = TRef [Term] deriving (Show, Eq, Ord)
-
--- | represents term element : functional symbol of type @f@ or variable of type @v@
-data TermElement
-  = TermVar LSymbol
-  | LSymbol LSymbol
-  deriving (Show, Read, Eq, Ord)
-
--- | returns name of variable or symbol
-elementName :: TermElement -> LSymbol
-elementName te = case te of
-  TermVar var -> var
-  LSymbol sym -> sym
 
 -- | 'ITerm' represents interface of object which is similar to STerm.
 class ITerm t where
@@ -89,18 +184,6 @@ instance (ITerm t1, ITerm t2, ITerm t3, ITerm t4) => ITermList (t1,t2,t3,t4) whe
 
 -- | comparison of 2 terms
 equalTerms t1 t2 = term t1 == term t2
-
--- | 'TermElement' represents term of one element
-instance ITerm TermElement where
-  term (TermVar x) = Var x
-  term (LSymbol s) = Const s
-
-  header te = te
-  subterms te = [term te]
-  termref te = TRef [term te]
-  subtermRefs te = [termref te]
-  operands _ = []
-  operandRefs _ = []
 
 -- | 'Term' represents term itself
 instance ITerm Term where
@@ -163,59 +246,9 @@ instance ITerm TermReference where
   -- Get term's reference for term's reference
   termref t = t
 
-instance Foldable TermTemplate where
-  foldMap f (Const c) = f c
-  foldMap f (Var v) = f v
-  foldMap f (Fun fun l) = f fun `mappend` foldMap (foldMap f) l
-
 -- | returns list of parent subterms of current subterm
 parentRefs :: TermReference -> [Term]
 parentRefs (TRef ref) = tail ref --ts:parentRefs (TRef (s:ts))
-
-class (Show s) => LogSymbol s where
-  str :: s -> String
-  str = show
-
-instance LogSymbol Int where
-  str = show
-
-instance LogSymbol Char where
-  str c = [c]
-
-instance LogSymbol String where
-  str s = s
-
-instance Show Term where
-  --show :: Show f => Show v => (Term f v -> String)
-  show (Var v) = '$':str v
-  show (Const c) = str c
-  show (Fun f l) = str f ++ "[" ++ sumstr [show x | x<-l] ++ "]"
-    where
-      sumstr []      = ""
-      sumstr [a]     = a
-      sumstr (x:y:ls) = x++","++sumstr (y:ls)
-
-instance Read Term where
-  --show :: Show f => Show v => (Term f v -> String)
-  readsPrec _ str =
-    case lex str of
-      ("$",r):_   -> [Arrow.first Var v | v <- lex r]
-      (s,'[':r):_ -> [Arrow.first (Fun (rmq s)) lx | lx <- reads ('[':r)]
-      (s,r):_     -> [(Const (rmq s),r)]
-      _           -> []
-      where
-        rmq s = case s of
-          '"':w -> init w
-          x     -> x
-
-infixr 5 &
-(&) :: (ITermList tl) => LSymbol -> tl -> Term
---f&[] = Const f
-f&l  = Fun f (termList l)
-
--- | converts 'TermReference' to 'Term'. For 'Sterm' and 'STermReference' same as 'term'
---refVal (TRef (x:_)) = x
---refVal (TRef []) = Empty
 
 -- replaces subterms from list s by corresponding subterms of list t
 replaceTerms :: Term -> [Term] -> [Term] -> Term
@@ -257,10 +290,4 @@ findMatches trm patt = concatMap m (subterms trm)
     m x = case hasMatch x patt of
       Nothing -> []
       Just l  -> [(x,l)]
-
--- | Does a term contain a logical symbol
-isContainLSymbol :: Term -> LSymbol -> Bool
-isContainLSymbol trm sym = any f trm
-  where
-    f x | x == sym = True
-    f _ = False
+-}

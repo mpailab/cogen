@@ -37,7 +37,7 @@ Symbol {
 },
 Symbol {
   id                = 5,
-  name              = "right to left",
+  name              = "right-to-left",
   synonyms          = ["firstsubterm"],
   inner             = False,
   los               = True,
@@ -47,7 +47,7 @@ Symbol {
 },
 Symbol {
   id                = 6,
-  name              = "left to right",
+  name              = "left-to-right",
   synonyms          = ["secondsubterm"],
   inner             = False,
   los               = True,
@@ -56,7 +56,7 @@ Symbol {
 },
 Symbol {
   id                = 7,
-  name              =  "",
+  name              =  "context",
   synonyms          = ["kontekst"],
   inner             = False,
   los               = True,
