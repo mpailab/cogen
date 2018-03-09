@@ -32,6 +32,9 @@ import           LSymbol
 import           Rule
 import           Term
 
+type Compiler a = State Info a
+-- type Compiler = StateT Info Global
+
 -- | Type of table of information units
 type Units = Map.Map LSymbol Unit
 
@@ -47,16 +50,16 @@ data Info = Info
 initInfo :: Rule -> Info
 initInfo rule = Info rule 2 Map.empty []
 
-getRule :: State Info Rule
+getRule :: Compiler Rule
 getRule = state $ \info -> (rule info, info)
 
-newProgVar :: State Info LSymbol
+newProgVar :: Compiler LSymbol
 newProgVar = state $ \info -> let n = varnum info in (P n, info {varnum = n + 1})
 
-newProgVarNum :: State Info Int
+newProgVarNum :: Compiler Int
 newProgVarNum = state $ \info -> let n = varnum info in (n, info {varnum = n + 1})
 
-getProgVarNum :: Term -> State Info Int
+getProgVarNum :: Term -> Compiler Int
 getProgVarNum (Var (x@(X _))) = state (\info ->
   let mb_n = fmap (\(I n) -> n) (Map.lookup x (units info))
       is_just = isJust mb_n
@@ -75,7 +78,7 @@ data Unit = I Int
           | EmptyUnit
 
 class GetUnit a where
-  getInfoUnit :: LSymbol -> State Info (Maybe a)
+  getInfoUnit :: LSymbol -> Compiler (Maybe a)
 
 instance GetUnit Int where
   getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(I n) -> n) x, info)
@@ -95,11 +98,11 @@ instance GetUnit [LSymbol] where
 instance GetUnit [Term] where
   getInfoUnit sym = getUnit sym >>= \x -> state $ \info -> (fmap (\(TS ts) -> ts) x, info)
 
-getUnit :: LSymbol -> State Info (Maybe Unit)
+getUnit :: LSymbol -> Compiler (Maybe Unit)
 getUnit sym = state $ \info -> (Map.lookup sym (units info), info)
 
 class AddUnit a where
-  addInfoUnit :: LSymbol -> a -> State Info ()
+  addInfoUnit :: LSymbol -> a -> Compiler ()
 
 instance AddUnit Int where
   addInfoUnit sym n = addUnit sym $ I n
@@ -119,11 +122,11 @@ instance AddUnit [LSymbol] where
 instance AddUnit [Term] where
   addInfoUnit sym ts = addUnit sym $ TS ts
 
-addUnit :: LSymbol -> Unit -> State Info ()
+addUnit :: LSymbol -> Unit -> Compiler ()
 addUnit sym unit = modify (\info -> info { units = Map.insert sym unit (units info) })
 
-getProgChunks :: State Info [Program]
+getProgChunks :: Compiler [Program]
 getProgChunks = state $ \info -> (chunks info, info)
 
-addProgChunk :: Program -> State Info ()
+addProgChunk :: Program -> Compiler ()
 addProgChunk prog = modify (\info -> info { chunks = chunks info ++ [prog] })

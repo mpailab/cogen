@@ -1,0 +1,87 @@
+[
+Symbol {
+  id                = 1,
+  name              = "if",
+  synonyms          = [],
+  categories        = ["Term"],
+  description       = "Logical symbol in the if-then statement"
+},
+Symbol {
+  id                = 2,
+  name              = "then",
+  synonyms          = [],
+  categories        = ["Term"],
+  description       = "Logical symbol in the if-then statement"
+},
+Symbol {
+  id                = 3,
+  name              = "equality",
+  synonyms          = ["=="],
+  categories        = ["Term"],
+  description       = "Logical symbol for the equality"
+},
+Symbol {
+  id                = 4,
+  name              = "forall",
+  synonyms          = [],
+  categories        = ["Term"],
+  description       = "Logical symbol for the universal quantifier"
+},
+Symbol {
+  id                = 5,
+  name              = "right-to-left",
+  synonyms          = ["firstsubterm"],
+  categories        = ["Rule.Header"],
+  description       = "Theorem header for right-to-left replacing of terms"
+
+},
+Symbol {
+  id                = 6,
+  name              = "left-to-right",
+  synonyms          = ["secondsubterm"],
+  categories        = ["Rule.Header"],
+  description       = "Theorem header for left-to-right replacing of terms"
+},
+Symbol {
+  id                = 7,
+  name              = "context",
+  synonyms          = ["kontekst"],
+  categories        = ["Rule.Filter", "Rule.Specifier"],
+  description       = ""
+},
+Symbol {
+  id                = 8,
+  name              = "boundVariables",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 9,
+  name              = "premises",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 10,
+  name              = "conclusion",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 11,
+  name              = "theorem",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 12,
+  name              = "equivalence",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+}
+]
