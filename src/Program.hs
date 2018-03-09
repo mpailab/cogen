@@ -28,7 +28,8 @@ module Program
       getProgram,
       getPrograms,
       initPrograms,
-      isKeyword,
+      isAction,
+      symbols,
       newPrograms,
       Program(..),
       Programs,
@@ -85,9 +86,8 @@ instance Show PSymbol where
   show Args      = "args"
   show Replace   = "replace"
 
-keywords :: [String]
-keywords = ["do", "done", "if", "case", "of", "where"]
-  ++ map show [Not, And, Or, Equal, NEqual, In, Args, Replace]
+symbols :: [String]
+symbols = map show [B True, B False, Not, And, Or, Equal, NEqual, In, Args, Replace]
 
 keywordsAction :: [PSymbol]
 keywordsAction = [Replace]
@@ -174,6 +174,3 @@ class Monad m => Base m where
 -- | Does a program term correspond to an action
 isAction :: PTerm -> Bool
 isAction (x :> _) = x `elem` keywordsAction
-
-isKeyword :: String -> Bool
-isKeyword x = x `elem` keywords
