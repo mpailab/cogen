@@ -3,46 +3,42 @@
 -- External imports
 import           Control.Concurrent
 import           Control.Monad
+import           Control.Monad.State
 import           Data.Typeable
-import           Prelude            hiding (init)
+import           Prelude             hiding (init)
 import           System.Directory
 import           System.IO
 
 -- Internal imports
-import           Compiler
+import           Global
 import           LSymbol
-import           Rule
-import           Term
+import           Program
+import           Program.Database
+import           Program.Parser
+import           Program.Writer
 
 -- | Test implementation
-test :: Integer -> IO Bool
+test :: Integer -> Global Bool
 test num = case num of
   1 -> do
-    let sym = Plus
-    let thrm = Forall :> [Var (X 1), Var (X 2), Var (X 3), Equivalence :> [Equal :> [Plus :> [Var (X 1), Var (X 2)], Plus :> [Neg :> [Var (X 1)], Var (X 3)]], Equal :> [Var (X 2), Neg :> [Var (X 3)]]]]
-    let h = Const LeftToRight
-    let rule = Rule sym thrm h [Level :> [Var (X 3)]] [Var (X 3)] [Var (X 3)]
-    writeFile "tmp/test1.txt" (show rule)
-    writeFile "tmp/draw.txt" (drawTerm thrm)
-    return True
-
-  2 -> do
-    rulesFile <- readFile "database/rules.db"
-    let rules = read rulesFile :: [Rule]
-    forM_ rules compile
+    load "database/lsymbols.db" >>= setLSymbols
+    let file = "database/programs/before.coral"
+    prog_str <- liftIO $ readFile file
+    prog :: Program <- parse prog_str file
+    liftIO . writeFile "database/programs/after.coral" =<< write prog
     return True
 
 -- | Run test with number num
 runTest :: Integer -> IO ()
 runTest num = do
   putStr (show num ++ " ... ")
-  res <- test num
+  res <- make (test num)
   if res then putStrLn "ok" else putStrLn "fail"
 
 main :: IO ()
 main = do
   createDirectoryIfMissing False "tmp"
   putStrLn "Run tests:"
-  let test_num = 2 in mapM runTest [1..test_num]
+  let test_num = 1 in mapM runTest [1..test_num]
   putStrLn "Done"
   removeDirectoryRecursive "tmp"
