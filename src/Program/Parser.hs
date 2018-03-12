@@ -91,7 +91,7 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-"]
+  , reservedOpNames= ["=", "<-", "@", "&"]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "and", "or", "eq", "ne", "in",
                       "args", "replace"]
@@ -161,16 +161,50 @@ boolParser =  (reservedParser "True"  >> return (B True))
 -- | Parser of symbols (logical symbols or variables)
 symbolParser :: NameSpace m => Parser m PTerm
 symbolParser = identifierParser >>= \name -> getLSymbol name >>= \case
-    Just s  -> return (S s)
-    Nothing -> getPVar name
+  Just s  -> return (S s)
+  Nothing -> getPVar name
+
+-- | Parser of program variables
+varParser :: NameSpace m => Parser m PTerm
+varParser = identifierParser >>= \name -> getLSymbol name >>= \case
+  Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
+  Nothing -> getPVar name
+
+-- | Parser of tuples of program terms
+tupleParser :: NameSpace m => Parser m PTerm
+tupleParser = do
+  ts <- parensParser (commaSepParser termParser)
+  case ts of
+    [t] -> return t
+    _   -> return (Tuple ts)
+
+-- | Parser of lists of program terms
+listParser :: NameSpace m => Parser m PTerm
+listParser = List <$> bracketsParser (commaSepParser termParser)
+
+-- | Parser of references to program terms
+refParser :: NameSpace m => Parser m PTerm
+refParser = do
+  X n <- try (varParser <* reservedOpParser "@") <?> "ref to PTerm"
+  t <- termParser
+  return (Ref n t)
+
+-- | Parser of pointers to program terms
+ptrParser :: NameSpace m => Parser m PTerm
+ptrParser = do
+  X n <- try (varParser <* reservedOpParser "&") <?> "ptr to PTerm"
+  t <- termParser
+  return (Ptr n t)
 
 -- | Parser of atomic program terms
 atomParser :: NameSpace m => Parser m PTerm
 atomParser =  intParser
           <|> boolParser
+          <|> refParser
+          <|> ptrParser
           <|> symbolParser
-          <|> Tuple <$> parensParser (commaSepParser termParser)
-          <|> List  <$> bracketsParser (commaSepParser termParser)
+          <|> tupleParser
+          <|> listParser
           <?> "atomic PTerm"
 
 -- | Parser of program terms

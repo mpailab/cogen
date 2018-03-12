@@ -8,7 +8,7 @@ case arg of
           where
             h in [equality, equivalence]
             x eq y
-        x_header [x_body] <- x
+        x_header [equality [a@(plus [p&x1, x2]), b@(plus [x3, x1])]] <- x
         done
     done
 done

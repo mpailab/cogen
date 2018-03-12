@@ -77,6 +77,8 @@ data PTerm = X Int                          -- ^ program variable
            | In PTerm PTerm                 -- ^ including for elements of set
            | Args PTerm                     -- ^ arguments of term
            | Replace PTerm                  -- !
+           | Ref Int PTerm                  -- ^ reference to program term
+           | Ptr Int PTerm                  -- ^ pointer to program term
            deriving (Eq, Ord)
 
 -- | Type of program
