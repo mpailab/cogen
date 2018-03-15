@@ -58,6 +58,8 @@ instance Program.Vars Global where
   getPVars = pvars <$> get
   setPVars db = modify (\info -> info { pvars = db })
 
+instance NameSpace Global
+
 ------------------------------------------------------------------------------------------
 -- Functions
 

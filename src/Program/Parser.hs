@@ -50,18 +50,17 @@ import           Utils
 --   }
 
 type Parser = ParsecT Text.Text ()
-  -- GenParser Info
 
-instance (LSymbol.Base m, Program.Vars m) => LSymbol.Base (Parser m) where
+instance NameSpace m => LSymbol.Base (Parser m) where
   getLSymbols = lift getLSymbols
   setLSymbols = lift . setLSymbols
 
-instance (LSymbol.Base m, Program.Vars m) => Program.Vars (Parser m) where
+instance NameSpace m => Program.Vars (Parser m) where
   getPVars = lift getPVars
   setPVars = lift . setPVars
 
 class Parse a where
-  parse :: (LSymbol.Base m, Program.Vars m) => String -> String -> m a
+  parse :: NameSpace m => String -> String -> m a
 
 ------------------------------------------------------------------------------------------
 -- Main functions
@@ -85,7 +84,7 @@ showPos pos = file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")"
     j = sourceColumn pos
 
 -- | This is a minimal token definition for Coral language.
-coralDef :: (LSymbol.Base m, Program.Vars m) => GenLanguageDef Text.Text () m
+coralDef :: NameSpace m => GenLanguageDef Text.Text () m
 coralDef = emptyDef
   { commentStart   = "{-"
   , commentEnd     = "-}"
@@ -101,50 +100,50 @@ coralDef = emptyDef
   }
 
 -- | Lexer for Coral language - collection of lexical parsers for tokens
-coralLexer :: (LSymbol.Base m, Program.Vars m) => GenTokenParser Text.Text () m
+coralLexer :: NameSpace m => GenTokenParser Text.Text () m
 coralLexer = makeTokenParser coralDef
 
-parensParser :: (LSymbol.Base m, Program.Vars m) => Parser m a -> Parser m a
+parensParser :: NameSpace m => Parser m a -> Parser m a
 parensParser = parens coralLexer
 
-bracketsParser :: (LSymbol.Base m, Program.Vars m) => Parser m a -> Parser m a
+bracketsParser :: NameSpace m => Parser m a -> Parser m a
 bracketsParser = brackets coralLexer
 
-identifierParser :: (LSymbol.Base m, Program.Vars m) => Parser m String
+identifierParser :: NameSpace m => Parser m String
 identifierParser = identifier coralLexer
 
-naturalParser :: (LSymbol.Base m, Program.Vars m) => Parser m Integer
+naturalParser :: NameSpace m => Parser m Integer
 naturalParser = natural coralLexer
 
-reservedOpParser :: (LSymbol.Base m, Program.Vars m) => String -> Parser m ()
+reservedOpParser :: NameSpace m => String -> Parser m ()
 reservedOpParser = reservedOp coralLexer
 
-reservedParser :: (LSymbol.Base m, Program.Vars m) => String -> Parser m ()
+reservedParser :: NameSpace m => String -> Parser m ()
 reservedParser = reserved coralLexer
 
-commaSepParser :: (LSymbol.Base m, Program.Vars m) => Parser m a -> Parser m [a]
+commaSepParser :: NameSpace m => Parser m a -> Parser m [a]
 commaSepParser = commaSep coralLexer
 
-whiteSpaceParser :: (LSymbol.Base m, Program.Vars m) => Parser m ()
+whiteSpaceParser :: NameSpace m => Parser m ()
 whiteSpaceParser = whiteSpace coralLexer
 
 -- | Parser of integers
-intParser :: (LSymbol.Base m, Program.Vars m) => Parser m PSymbol
+intParser :: NameSpace m => Parser m PSymbol
 intParser = (I . fromInteger) <$> naturalParser
 
 -- | Parser of boolean values
-boolParser :: (LSymbol.Base m, Program.Vars m) => Parser m PSymbol
+boolParser :: NameSpace m => Parser m PSymbol
 boolParser =  (reservedParser "True"  >> return (B True))
       <|> (reservedParser "False" >> return (B False))
 
 -- | Parser of symbols (logical symbols or variables)
-symbolParser :: (LSymbol.Base m, Program.Vars m) => Parser m PSymbol
+symbolParser :: NameSpace m => Parser m PSymbol
 symbolParser = identifierParser >>= \name -> getLSymbol name >>= \case
     Just s  -> return (S s)
     Nothing -> getPVar name
 
 -- | Parser of atomic program terms
-atomParser :: (LSymbol.Base m, Program.Vars m) => Parser m PTerm
+atomParser :: NameSpace m => Parser m PTerm
 atomParser =  T <$> intParser
           <|> T <$> boolParser
           <|> T <$> symbolParser
@@ -153,13 +152,13 @@ atomParser =  T <$> intParser
           <?> "atomic PTerm"
 
 -- | Parser of program terms
-termParser :: (LSymbol.Base m, Program.Vars m) => Parser m PTerm
+termParser :: NameSpace m => Parser m PTerm
 termParser =  try (liftM2 pTerm symbolParser atomParser)
           <|> buildExpressionParser table atomParser
           <?> "PTerm"
 
 -- Table for parsing of composite program terms
-table :: (LSymbol.Base m, Program.Vars m) => [[Operator Text.Text () m PTerm]]
+table :: NameSpace m => [[Operator Text.Text () m PTerm]]
 table = [ [Prefix (reservedParser "no" >> return pNot)]
         , [Prefix (reservedParser "args" >> return pArgs)]
         , [Prefix (reservedParser "replace" >> return pReplace)]
@@ -171,7 +170,7 @@ table = [ [Prefix (reservedParser "no" >> return pNot)]
         ]
 
 -- | Parser of where-statement
-whereParser :: (LSymbol.Base m, Program.Vars m) => Parser m PTerm
+whereParser :: NameSpace m => Parser m PTerm
 whereParser =
   do { reservedParser "where"
      ; ts <- many1 (try (termParser <* notFollowedBy (opStart coralDef)) <?> "where")
@@ -180,11 +179,11 @@ whereParser =
   <|> return (T (B True))
 
 -- | Parser of do-statement
-doParser :: (LSymbol.Base m, Program.Vars m) => Parser m Program
+doParser :: NameSpace m => Parser m Program
 doParser = reservedParser "do" >> programParser
 
 -- | Parser of programs
-programParser :: (LSymbol.Base m, Program.Vars m) => Parser m Program
+programParser :: NameSpace m => Parser m Program
 programParser = (reservedParser "done" >> return Program.Empty)
 
          -- Parse an assigning instruction

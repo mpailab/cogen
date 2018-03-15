@@ -40,7 +40,7 @@ import           Utils
 -- Data types and clases declaration
 
 -- | Database instance for programs
-instance (LSymbol.Base m, Program.Base m, Program.Vars m, MonadIO m) =>
+instance (NameSpace m, Program.Base m, MonadIO m) =>
          Database String Programs m where
 
   -- | Load the database of programs from a given directory
@@ -51,8 +51,7 @@ instance (LSymbol.Base m, Program.Base m, Program.Vars m, MonadIO m) =>
        Left _            -> getPrograms
        Right dir_content -> mapM_ f dir_content >> getPrograms
        where
-         f :: (LSymbol.Base m, Program.Base m, Program.Vars m, MonadIO m) =>
-              FilePath -> m ()
+         f :: (NameSpace m, Program.Base m, MonadIO m) => FilePath -> m ()
          f file = do
            db <- getPrograms
            lsym_db <- getLSymbols
@@ -67,12 +66,11 @@ instance (LSymbol.Base m, Program.Base m, Program.Vars m, MonadIO m) =>
     liftIO $ createDirectoryIfMissing True dir
     mapM_ f (M.assocs db)
     where
-      f :: (LSymbol.Base m, Program.Base m, Program.Vars m, MonadIO m) =>
-           (LSymbol, Program) -> m ()
+      f :: (NameSpace m, Program.Base m, MonadIO m) => (LSymbol, Program) -> m ()
       f (s, p) = join $ liftM2 writeFileM (dir +>+ nameLSymbol s +<+ ".db") (write p)
 
 -- | Database instance for program
-instance (LSymbol.Base m, Program.Base m, Program.Vars m, MonadIO m) =>
+instance (NameSpace m, Program.Base m, MonadIO m) =>
          Database (String, LSymbol) Program m where
 
   -- | Load a program of logical symbol from a database saved in given directory

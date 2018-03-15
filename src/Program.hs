@@ -34,6 +34,7 @@ module Program
       namePVar,
       newPrograms,
       newPVars,
+      NameSpace,
       Program(..),
       Program.Base,
       Program.Vars,
@@ -220,6 +221,9 @@ class Monad m => Vars m where
                                   (M.insert name n (numbers db))
                                   (n + 1)
                in setPVars new_db >> return (X n)
+
+-- | Class of namespace
+class (LSymbol.Base m, Program.Vars m) => NameSpace m
 
 ------------------------------------------------------------------------------------------
 -- Functions
