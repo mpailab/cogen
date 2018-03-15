@@ -24,24 +24,33 @@ module Program
     (
       -- exports
       addProgram,
-      Program.Base,
       getProgram,
       getPrograms,
+      getPVar,
+      getPVars,
       initPrograms,
+      initPVars,
       isAction,
-      symbols,
+      namePVar,
       newPrograms,
+      newPVars,
       Program(..),
+      Program.Base,
+      Program.Vars,
       Programs,
+      PVars,
       PSymbol(..),
       PTerm,
-      setPrograms
+      setPrograms,
+      setPVars,
+      symbols
     )
 where
 
   -- External imports
 import           Control.Monad
 import           Control.Monad.State
+import           Data.Array
 import           Data.Char
 import qualified Data.Map            as M
 import           Data.Maybe
@@ -50,6 +59,7 @@ import           Text.Regex.Posix
 -- Internal imports
 import           LSymbol
 import           Term
+import           Utils
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -167,6 +177,49 @@ class Monad m => Base m where
   -- | Add a program of logical symbol to a database
   addProgram :: LSymbol -> Program -> m ()
   addProgram s p = getPrograms >>= setPrograms . M.insert s p
+
+-- | Type for database of program variables
+data PVars = PVars
+  {
+    names   :: Array Int String, -- ^ names of variable
+    numbers :: M.Map String Int, -- ^ numbers of variables
+    curNum  :: Int               -- ^ number of first free variable
+  }
+
+-- | Init a database of program variables
+initPVars :: PVars
+initPVars = PVars (array (1,0) []) M.empty 1
+
+-- | Class of program variables
+class Monad m => Vars m where
+  {-# MINIMAL getPVars, setPVars #-}
+
+  -- | Get a database of program variables
+  getPVars :: m PVars
+
+  -- | Set a database of program variables
+  setPVars :: PVars -> m ()
+
+  -- | Init a new database of program variables
+  newPVars :: m PVars
+  newPVars = let db = initPVars in setPVars db >> return db
+
+  -- | Get the name of a program variable by its number
+  namePVar :: Int -> m (Maybe String)
+  namePVar n = getPVars >>= \db ->
+    let m = curNum db
+        x = if 0 < n && n < m then Just (names db ! (m - n)) else Nothing
+    in return x
+
+  -- | Get a program variable by its name
+  getPVar :: String -> m PSymbol
+  getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
+    Just n  -> return (X n)
+    Nothing -> let n = curNum db
+                   new_db = PVars (listArray (1,n) (name : elems (names db)))
+                                  (M.insert name n (numbers db))
+                                  (n + 1)
+               in setPVars new_db >> return (X n)
 
 ------------------------------------------------------------------------------------------
 -- Functions

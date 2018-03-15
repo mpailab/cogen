@@ -39,7 +39,8 @@ type Global = StateT Info IO
 data Info = Info
   {
     lsymbols :: LSymbols, -- ^ database of logical symbols
-    programs :: Programs  -- ^ database of programs
+    programs :: Programs, -- ^ database of programs
+    pvars    :: PVars     -- ^ database of program variables
   }
 
 ------------------------------------------------------------------------------------------
@@ -53,9 +54,13 @@ instance Program.Base Global where
   getPrograms = programs <$> get
   setPrograms db = modify (\info -> info { programs = db })
 
+instance Program.Vars Global where
+  getPVars = pvars <$> get
+  setPVars db = modify (\info -> info { pvars = db })
+
 ------------------------------------------------------------------------------------------
 -- Functions
 
 -- | Make somesing in monad Global
 make :: Global a -> IO a
-make = (`evalStateT` Info initLSymbols initPrograms)
+make = (`evalStateT` Info initLSymbols initPrograms initPVars)

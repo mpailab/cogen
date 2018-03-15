@@ -95,7 +95,7 @@ class Monad m => Base m where
   newLSymbols = let db = initLSymbols in setLSymbols db >> return db
 
   listLSymbols :: m [String]
-  listLSymbols = getLSymbols >>= return . (map name_) . elems . fst
+  listLSymbols = (map name_ . elems . fst) <$> getLSymbols
 
   -- | Get the name of a logical symbol
   nameLSymbol :: LSymbol -> m String
@@ -114,7 +114,7 @@ class Monad m => Base m where
   addLSymbol n s c d = do
     db <- getLSymbols
     let (f,l) = bounds $ fst db
-    let i = l-1
+    let i = l+1
     let sym = S i
     let a = listArray (f,i) $ elems (fst db) ++ [Symbol i n s c d]
     let b = foldr (\x y -> M.insert x sym y) (M.insert n sym $ snd db) s

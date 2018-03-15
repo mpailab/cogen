@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE LambdaCase           #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
 {-|
@@ -20,6 +21,7 @@ where
 -- External imports
 import           Control.Monad
 import           Data.List
+import           Data.Maybe
 
 -- Internal imports
 import           LSymbol
@@ -31,7 +33,7 @@ import           Utils
 -- Data types and clases declaration
 
 class Write a where
-  write :: LSymbol.Base m => a -> m String
+  write :: (LSymbol.Base m, Program.Vars m) => a -> m String
 
 instance Write PSymbol where
   write = writePSymbol
@@ -46,27 +48,30 @@ instance Write Program where
 -- Functions
 
 -- | Write a program symbol
-writePSymbol :: LSymbol.Base m => PSymbol -> m String
+writePSymbol :: (LSymbol.Base m, Program.Vars m) => PSymbol -> m String
+writePSymbol (X n) = namePVar n >>= \case
+  Just name -> return name
+  _ -> error ("Can't find var " ++ show n ++ "\n")
 writePSymbol (S s) = nameLSymbol s
 writePSymbol s     = return (show s)
 
 -- | Write sequence of program terms
-writeSequence :: LSymbol.Base m => [PTerm] -> m String
+writeSequence :: (LSymbol.Base m, Program.Vars m) => [PTerm] -> m String
 writeSequence [t]    = writePTerm False t
 writeSequence (t:ts) = writePTerm False t +<>+ ", " +>+ writeSequence ts
 
 -- | Write prefix expression
-writePrefx :: LSymbol.Base m => PSymbol -> [PTerm] -> m String
+writePrefx :: (LSymbol.Base m, Program.Vars m) => PSymbol -> [PTerm] -> m String
 writePrefx x [t] = write x +<>+ writePTerm True t
 writePrefx x ts  =  write x +<>+ (unwords <$> mapM (writePTerm True) ts)
 
 -- | Write infix expression
-writeInfx :: LSymbol.Base m => PSymbol -> [PTerm] -> m String
+writeInfx :: (LSymbol.Base m, Program.Vars m) => PSymbol -> [PTerm] -> m String
 writeInfx x ts = liftM2 intercalate (" " +>+ write x +<+ " ")
                                     (mapM (writePTerm True) ts)
 
 -- | Write a program term
-writePTerm :: LSymbol.Base m => Bool -> PTerm -> m String
+writePTerm :: (LSymbol.Base m, Program.Vars m) => Bool -> PTerm -> m String
 writePTerm par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
   where
     f (T x)           = (write x, False)
@@ -85,15 +90,15 @@ writePTerm par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
     f (Args :> x)     = (writePrefx Args x, True)
     f (Replace :> x)  = (writePrefx Replace x, True)
 
-writeIndent :: LSymbol.Base m => Int -> m String
+writeIndent :: (LSymbol.Base m, Program.Vars m) => Int -> m String
 writeIndent 0 = return ""
 writeIndent n = writeIndent (n-1) >>= \x -> return (' ' : ' ' : x)
 
-writeWhere :: LSymbol.Base m => Int -> [PTerm] -> m String
+writeWhere :: (LSymbol.Base m, Program.Vars m) => Int -> [PTerm] -> m String
 writeWhere ind = foldr (\ t -> (+<>+) (writeIndent ind +<>+ write t +<+ "\n")) (return "")
 
 -- | Write a program fragment corresponding to a given indent
-writeProgram :: LSymbol.Base m => Int -> Program -> m String
+writeProgram :: (LSymbol.Base m, Program.Vars m) => Int -> Program -> m String
 
 -- | Write an assigning instruction of program fragment corresponding to a given indent
 writeProgram ind (Assign pat (List :> [val]) (T (B True)) jump) =
@@ -172,7 +177,8 @@ writeProgram ind (Action act cond jump) =
 writeProgram ind Empty =
   writeIndent ind +<+ "done\n"
 
-writeSwitchCases :: LSymbol.Base m => Int -> [(PTerm, Program)] -> m String
+writeSwitchCases :: (LSymbol.Base m,
+                     Program.Vars m) => Int -> [(PTerm, Program)] -> m String
 writeSwitchCases ind ((pat,prog):cs) =
   writeIndent ind +<>+ write pat +<>+ "\n" +>+
   writeIndent ind +<>+ "do\n" +>+

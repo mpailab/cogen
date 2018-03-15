@@ -1,14 +1,14 @@
-case t0 of
-  theorem [t1]
+case arg of
+  theorem [thrm]
   do
-    case t1 of
-      forall [boundVariables t2, premises t3, conclusion [t4]]
+    case thrm of
+      forall [boundVariables vars, premises prems, conclusion [concl]]
       do
-        t5 [t6, t7] = t4
+        h [x, y] = concl
           where
-            t5 in [equality, equivalence]
-            t6 eq t7
-        t8 [t9] <- t6
+            h in [equality, equivalence]
+            x eq y
+        x_header [x_body] <- x
         done
     done
 done
