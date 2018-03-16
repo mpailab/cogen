@@ -43,31 +43,31 @@ import           Utils
 ------------------------------------------------------------------------------------------
 -- Data types and classes declaration
 
-data Info = Info
-  {
-    lsymbols :: LSymbols,
-    locals   :: Map.Map String Int,
-    varnum   :: Int
-  }
+-- | Parser type
+type Parser = ParsecT Text.Text ()
 
-type Parser = GenParser Info
+-- | Parser instance for treatment of logical symbols in underlying monad
+instance NameSpace m => LSymbol.Base (Parser m) where
+  getLSymbols = lift getLSymbols
+  setLSymbols = lift . setLSymbols
 
-instance LSymbol.Base Parser where
-  getLSymbols = lsymbols <$> getState
-  setLSymbols db = modifyState (\info -> info { lsymbols = db })
+-- | Parser instance for treatment of program variables in underlying monad
+instance NameSpace m => Program.Vars (Parser m) where
+  getPVars = lift getPVars
+  setPVars = lift . setPVars
 
+-- | Class of parsers in underlying monad with constrained 'NameSpace'.
 class Parse a where
-  parse :: LSymbol.Base m => String -> String -> m a
+  parse :: NameSpace m => String -> String -> m a
 
 ------------------------------------------------------------------------------------------
 -- Main functions
 
 -- | Parse instance for programs
 instance Parse Program where
-  parse str source = getLSymbols >>= \db ->
-    case runParser programParser (Info db Map.empty 0) source (Text.pack str) of
-      Right p   -> return p
-      Left  err -> (error . errorToString) err
+  parse str source = runParserT programParser () source (Text.pack str) >>= \case
+    Right p   -> return p
+    Left  err -> (error . errorToString) err
 
 errorToString :: ParseError -> String
 errorToString err = "Program parser error:\n"
@@ -82,6 +82,7 @@ showPos pos = file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")"
     j = sourceColumn pos
 
 -- | This is a minimal token definition for Coral language.
+coralDef :: NameSpace m => GenLanguageDef Text.Text () m
 coralDef = emptyDef
   { commentStart   = "{-"
   , commentEnd     = "-}"
@@ -96,37 +97,74 @@ coralDef = emptyDef
   , caseSensitive  = True
   }
 
--- | Collection of lexical parsers for tokens of Coral language
-TokenParser { parens = parensParser
-            , brackets = bracketsParser
-            , identifier = identifierParser
-            , natural = naturalParser
-            , reservedOp = reservedOpParser
-            , reserved = reservedParser
-            , commaSep = commaSepParser
-            , whiteSpace = whiteSpaceParser } = makeTokenParser coralDef
+-- | Lexer for Coral language - collection of lexical parsers for tokens
+coralLexer :: NameSpace m => GenTokenParser Text.Text () m
+coralLexer = makeTokenParser coralDef
+
+-- | Lexeme parser @parensParser p@ parses @p@ enclosed in parenthesis,
+-- returning the value of @p@.
+parensParser :: NameSpace m => Parser m a -> Parser m a
+parensParser = parens coralLexer
+
+-- | Lexeme parser @bracketsParser p@ parses @p@ enclosed in brackets (\'[\'
+-- and \']\'), returning the value of @p@.
+bracketsParser :: NameSpace m => Parser m a -> Parser m a
+bracketsParser = brackets coralLexer
+
+-- | Lexeme parser @identifierParser@ parses a legal identifier of Coral language.
+-- Returns the identifier string. This parser will fail on identifiers that are reserved
+-- words. Legal identifier (start) characters and reserved words are
+-- defined in the 'coralDef'.
+identifierParser :: NameSpace m => Parser m String
+identifierParser = identifier coralLexer
+
+-- | Lexeme parser @naturalParser@ parses a natural number (a positive whole
+-- number). Returns the value of the number. The number is parsed according to the grammar
+-- rules in the Haskell report.
+naturalParser :: NameSpace m => Parser m Integer
+naturalParser = natural coralLexer
+
+-- | The lexeme parser @reservedOpParser name@ parses symbol @name@ which is a reserved
+-- operator of Coral language. It also checks that the @name@ is not a prefix of a valid
+-- operator.
+reservedOpParser :: NameSpace m => String -> Parser m ()
+reservedOpParser = reservedOp coralLexer
+
+-- | The lexeme parser @reservedParser name@ parses symbol @name@ which is a reserved
+-- identifier of Coral language. It also checks that the @name@ is not a prefix of a
+-- valid identifier.
+reservedParser :: NameSpace m => String -> Parser m ()
+reservedParser = reserved coralLexer
+
+-- | Lexeme parser @commaSepParser p@ parses /zero/ or more occurrences of @p@ separated
+-- by comma. Returns a list of values returned by @p@.
+commaSepParser :: NameSpace m => Parser m a -> Parser m [a]
+commaSepParser = commaSep coralLexer
+
+-- | Parses any white space. White space consists of /zero/ or more
+-- occurrences of a space character (any character which satisfies isSpace), a line
+-- comment or a block (multi line) comment. Block comments may be nested. How comments are
+-- started and ended is defined in the 'coralDef'.
+whiteSpaceParser :: NameSpace m => Parser m ()
+whiteSpaceParser = whiteSpace coralLexer
 
 -- | Parser of integers
-intParser :: Parser PSymbol
+intParser :: NameSpace m => Parser m PSymbol
 intParser = (I . fromInteger) <$> naturalParser
 
 -- | Parser of boolean values
-boolParser :: Parser PSymbol
+boolParser :: NameSpace m => Parser m PSymbol
 boolParser =  (reservedParser "True"  >> return (B True))
       <|> (reservedParser "False" >> return (B False))
 
 -- | Parser of symbols (logical symbols or variables)
-symbolParser :: Parser PSymbol
+symbolParser :: NameSpace m => Parser m PSymbol
 symbolParser = identifierParser >>= \name -> getLSymbol name >>= \case
     Just s  -> return (S s)
-    Nothing -> getState >>= \info -> let n = varnum info; l = locals info in
-      case Map.lookup name l of
-        Just i  -> return (X i)
-        Nothing -> modifyState (\i -> i {varnum = n + 1,
-                                         locals = Map.insert name n l}) >> return (X n)
+    Nothing -> getPVar name
 
 -- | Parser of atomic program terms
-atomParser :: Parser PTerm
+atomParser :: NameSpace m => Parser m PTerm
 atomParser =  T <$> intParser
           <|> T <$> boolParser
           <|> T <$> symbolParser
@@ -135,12 +173,13 @@ atomParser =  T <$> intParser
           <?> "atomic PTerm"
 
 -- | Parser of program terms
-termParser :: Parser PTerm
+termParser :: NameSpace m => Parser m PTerm
 termParser =  try (liftM2 pTerm symbolParser atomParser)
           <|> buildExpressionParser table atomParser
           <?> "PTerm"
 
 -- Table for parsing of composite program terms
+table :: NameSpace m => [[Operator Text.Text () m PTerm]]
 table = [ [Prefix (reservedParser "no" >> return pNot)]
         , [Prefix (reservedParser "args" >> return pArgs)]
         , [Prefix (reservedParser "replace" >> return pReplace)]
@@ -152,7 +191,7 @@ table = [ [Prefix (reservedParser "no" >> return pNot)]
         ]
 
 -- | Parser of where-statement
-whereParser :: Parser PTerm
+whereParser :: NameSpace m => Parser m PTerm
 whereParser =
   do { reservedParser "where"
      ; ts <- many1 (try (termParser <* notFollowedBy (opStart coralDef)) <?> "where")
@@ -161,11 +200,11 @@ whereParser =
   <|> return (T (B True))
 
 -- | Parser of do-statement
-doParser :: Parser Program
+doParser :: NameSpace m => Parser m Program
 doParser = reservedParser "do" >> programParser
 
 -- | Parser of programs
-programParser :: Parser Program
+programParser :: NameSpace m => Parser m Program
 programParser = (reservedParser "done" >> return Program.Empty)
 
          -- Parse an assigning instruction
