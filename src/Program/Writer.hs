@@ -49,9 +49,9 @@ instance Write Program where
 
 -- | Write a program symbol
 writePSymbol :: NameSpace m => PSymbol -> m String
-writePSymbol (X n) = namePVar n >>= \case
+writePSymbol s@(X n) = namePVar n >>= \case
   Just name -> return name
-  _ -> error ("Can't find var " ++ show n ++ "\n")
+  _ -> error ("Unknown variables " ++ show s ++ "\n")
 writePSymbol (S s) = nameLSymbol s
 writePSymbol s     = return (show s)
 

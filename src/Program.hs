@@ -222,7 +222,7 @@ class Monad m => Vars m where
                                   (n + 1)
                in setPVars new_db >> return (X n)
 
--- | Class of namespace
+-- | Class for namespace of logical symbols and program variables
 class (LSymbol.Base m, Program.Vars m) => NameSpace m
 
 ------------------------------------------------------------------------------------------

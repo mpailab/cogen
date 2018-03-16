@@ -43,22 +43,20 @@ import           Utils
 ------------------------------------------------------------------------------------------
 -- Data types and classes declaration
 
--- data Info = Info
---   {
---     lsymbols :: LSymbols,
---     locals   :: PVars
---   }
-
+-- | Parser type
 type Parser = ParsecT Text.Text ()
 
+-- | Parser instance for treatment of logical symbols in underlying monad
 instance NameSpace m => LSymbol.Base (Parser m) where
   getLSymbols = lift getLSymbols
   setLSymbols = lift . setLSymbols
 
+-- | Parser instance for treatment of program variables in underlying monad
 instance NameSpace m => Program.Vars (Parser m) where
   getPVars = lift getPVars
   setPVars = lift . setPVars
 
+-- | Class of parsers in underlying monad with constrained 'NameSpace'.
 class Parse a where
   parse :: NameSpace m => String -> String -> m a
 
@@ -103,27 +101,50 @@ coralDef = emptyDef
 coralLexer :: NameSpace m => GenTokenParser Text.Text () m
 coralLexer = makeTokenParser coralDef
 
+-- | Lexeme parser @parensParser p@ parses @p@ enclosed in parenthesis,
+-- returning the value of @p@.
 parensParser :: NameSpace m => Parser m a -> Parser m a
 parensParser = parens coralLexer
 
+-- | Lexeme parser @bracketsParser p@ parses @p@ enclosed in brackets (\'[\'
+-- and \']\'), returning the value of @p@.
 bracketsParser :: NameSpace m => Parser m a -> Parser m a
 bracketsParser = brackets coralLexer
 
+-- | Lexeme parser @identifierParser@ parses a legal identifier of Coral language.
+-- Returns the identifier string. This parser will fail on identifiers that are reserved
+-- words. Legal identifier (start) characters and reserved words are
+-- defined in the 'coralDef'.
 identifierParser :: NameSpace m => Parser m String
 identifierParser = identifier coralLexer
 
+-- | Lexeme parser @naturalParser@ parses a natural number (a positive whole
+-- number). Returns the value of the number. The number is parsed according to the grammar
+-- rules in the Haskell report.
 naturalParser :: NameSpace m => Parser m Integer
 naturalParser = natural coralLexer
 
+-- | The lexeme parser @reservedOpParser name@ parses symbol @name@ which is a reserved
+-- operator of Coral language. It also checks that the @name@ is not a prefix of a valid
+-- operator.
 reservedOpParser :: NameSpace m => String -> Parser m ()
 reservedOpParser = reservedOp coralLexer
 
+-- | The lexeme parser @reservedParser name@ parses symbol @name@ which is a reserved
+-- identifier of Coral language. It also checks that the @name@ is not a prefix of a
+-- valid identifier.
 reservedParser :: NameSpace m => String -> Parser m ()
 reservedParser = reserved coralLexer
 
+-- | Lexeme parser @commaSepParser p@ parses /zero/ or more occurrences of @p@ separated
+-- by comma. Returns a list of values returned by @p@.
 commaSepParser :: NameSpace m => Parser m a -> Parser m [a]
 commaSepParser = commaSep coralLexer
 
+-- | Parses any white space. White space consists of /zero/ or more
+-- occurrences of a space character (any character which satisfies isSpace), a line
+-- comment or a block (multi line) comment. Block comments may be nested. How comments are
+-- started and ended is defined in the 'coralDef'.
 whiteSpaceParser :: NameSpace m => Parser m ()
 whiteSpaceParser = whiteSpace coralLexer
 
