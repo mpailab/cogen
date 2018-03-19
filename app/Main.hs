@@ -1,6 +1,7 @@
 module Main where
 
-import Lib
+  -- Internal imports
+import           Term
 
 main :: IO ()
-main = someFunc
+main = putStrLn "Run cogen"

@@ -1,0 +1,8 @@
+[Rule {
+  symbol      = Plus,
+  theorem     = Forall[$x1,$x2,$x3,Equivalence[Equal[Plus[$x1,$x2],Plus[Neg[$x1],$x3]],Equal[$x2,Neg[$x3]]]],
+  header      = LeftToRight,
+  filters     = [Level[1]],
+  specifiers  = [],
+  normalizers = []
+}]
