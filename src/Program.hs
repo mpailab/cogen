@@ -30,7 +30,6 @@ module Program
       getPVars,
       initPrograms,
       initPVars,
-      isAction,
       namePVar,
       newPrograms,
       newPVars,
@@ -40,11 +39,9 @@ module Program
       Program.Vars,
       Programs,
       PVars,
-      PSymbol(..),
-      PTerm,
+      PTerm(..),
       setPrograms,
-      setPVars,
-      symbols
+      setPVars
     )
 where
 
@@ -59,52 +56,28 @@ import           Text.Regex.Posix
 
 -- Internal imports
 import           LSymbol
-import           Term
 import           Utils
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
--- | Type of program symbols
-data PSymbol = X Int                    -- ^ program variable
-             | I Int                    -- ^ integer constant
-             | B Bool                   -- ^ boolean constant
-             | S LSymbol                -- ^ user-defined logical symbol
-             | List                     -- ^ list of terms
-             | Tuple                    -- ^ tuple of terms
-             | Not                      -- ^ logical negation
-             | And                      -- ^ logical and
-             | Or                       -- ^ logical or
-             | Equal                    -- ^ equality of objects
-             | NEqual                   -- ^ negation of equality of objects
-             | In                       -- ^ including for elements of set
-             | Args                     -- ^ arguments of term
-             | Replace                  -- !
-             deriving (Eq, Ord)
-
--- | Show instance for program symbols
-instance Show PSymbol where
-  show (X i)     = 't' : show i
-  show (I i)     = show i
-  show (B True)  = "True"
-  show (B False) = "False"
-  show Not       = "no"
-  show And       = "and"
-  show Or        = "or"
-  show Equal     = "eq"
-  show NEqual    = "ne"
-  show In        = "in"
-  show Args      = "args"
-  show Replace   = "replace"
-
-symbols :: [String]
-symbols = map show [B True, B False, Not, And, Or, Equal, NEqual, In, Args, Replace]
-
-keywordsAction :: [PSymbol]
-keywordsAction = [Replace]
-
 -- | Type of program terms
-type PTerm = Term PSymbol
+data PTerm = X Int                          -- ^ program variable
+           | I Int                          -- ^ integer constant
+           | B Bool                         -- ^ boolean constant
+           | S LSymbol                      -- ^ user-defined logical symbol
+           | Term PTerm PTerm               -- ^ logical term
+           | List [PTerm]                   -- ^ list of terms
+           | Tuple [PTerm]                  -- ^ tuple of terms
+           | Not PTerm                      -- ^ logical negation
+           | And [PTerm]                    -- ^ logical and
+           | Or [PTerm]                     -- ^ logical or
+           | Equal PTerm PTerm              -- ^ equality of objects
+           | NEqual PTerm PTerm             -- ^ negation of equality of objects
+           | In PTerm PTerm                 -- ^ including for elements of set
+           | Args PTerm                     -- ^ arguments of term
+           | Replace PTerm                  -- !
+           deriving (Eq, Ord)
 
 -- | Type of program
 data Program
@@ -213,7 +186,7 @@ class Monad m => Vars m where
     in return x
 
   -- | Get a program variable by its name
-  getPVar :: String -> m PSymbol
+  getPVar :: String -> m PTerm
   getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
     Just n  -> return (X n)
     Nothing -> let n = curNum db
@@ -227,7 +200,3 @@ class (LSymbol.Base m, Program.Vars m) => NameSpace m
 
 ------------------------------------------------------------------------------------------
 -- Functions
-
--- | Does a program term correspond to an action
-isAction :: PTerm -> Bool
-isAction (x :> _) = x `elem` keywordsAction

@@ -51,37 +51,37 @@ type Handler a = State Args a
 
 eval :: PTerm -> Handler Expr
 
-eval (T (X i)) = do
+eval (X i) = do
     table <- get
     case M.lookup i table of
       Just x  -> return x
       Nothing -> error "Evaluating error: a variable is not initialized\n"
 
-eval (T (I i)) = return (IE i)
+eval (I i) = return (IE i)
 
-eval (T (B c)) = return (BE c)
+eval (B c) = return (BE c)
 
-eval (T (S x)) = return (SE x)
+eval (S x) = return (SE x)
 
-eval (List :> x) = LE <$> mapM eval x
+eval (List x) = LE <$> mapM eval x
 
-eval (Not :> [x]) = eval x >>= \(BE y) -> (return . BE . Prelude.not) y
+eval (Not x) = eval x >>= \(BE y) -> (return . BE . Prelude.not) y
 
-eval (And :> x) = BE <$> (mapM eval x >>= foldrM (\(BE y) -> (return . (y &&))) True)
+eval (And x) = BE <$> (mapM eval x >>= foldrM (\(BE y) -> (return . (y &&))) True)
 
-eval (Or :> x) = BE <$> (mapM eval x >>= foldrM (\(BE y) -> (return . (y ||))) False)
+eval (Or x) = BE <$> (mapM eval x >>= foldrM (\(BE y) -> (return . (y ||))) False)
 
-eval (Equal :> [x,y])  = BE <$> liftM2 (==) (eval x) (eval y)
+eval (Equal x y)  = BE <$> liftM2 (==) (eval x) (eval y)
 
-eval (NEqual :> [x,y]) = BE <$> liftM2 (/=) (eval x) (eval y)
+eval (NEqual x y) = BE <$> liftM2 (/=) (eval x) (eval y)
 
-eval (In :> [x, List :> y]) = BE <$> liftM2 elem (eval x) (mapM eval y)
+eval (In x (List y)) = BE <$> liftM2 elem (eval x) (mapM eval y)
 
-eval (Args :> [x]) = eval x >>= \(TE t) -> (return . LE . fmap TE . Term.args) t
+eval (Args x) = eval x >>= \(TE t) -> (return . LE . fmap TE . Term.args) t
 
 
 make :: PTerm -> Handler ()
-make (Replace :> x) = return ()
+make (Replace x) = return ()
 
 
 -- Identify a program term with a given expression
@@ -90,7 +90,7 @@ make (Replace :> x) = return ()
 -- State of Handler stores assignments of program variables.
 ident :: PTerm -> Expr -> Handler Bool
 
-ident (T (X i)) e = do
+ident (X i) e = do
   s <- get
   case M.lookup i s of
     Just x
@@ -98,16 +98,20 @@ ident (T (X i)) e = do
       | otherwise -> return False
     Nothing       -> modify (M.insert i e) >> return True
 
-ident (T x) (TE (T y))
-  | x == S y  = return True
+ident (S x) (SE y)
+  | x == y    = return True
   | otherwise = return False
 
-ident (x :> ps) (TE (y :> ts))
-  | length ps /= length ts = return False
-  | x == S y               = fmap and (zipWithM ident ps (fmap TE ts))
-  | otherwise              = return False
+ident (S x) (TE (T y))
+  | x == y    = return True
+  | otherwise = return False
 
-ident (List :> x) (LE y)
+ident (Term (S x) (List ps)) (TE (y :> ts))
+  | length ps /= length ts = return False
+  | x /= y                 = return False
+  | otherwise              = fmap and (zipWithM ident ps (fmap TE ts))
+
+ident (List x) (LE y)
   | length x == length y = fmap and (zipWithM ident x y)
   | otherwise            = return False
 
