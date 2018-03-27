@@ -83,7 +83,7 @@ writePTerm par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
     f (NEqual x y)     = (writeInfx "ne" [x,y], True)
     f (In x y)         = (writeInfx "in" [x,y], True)
     f (Args x)         = (writePrefx "args" [x], True)
-    f (Replace x)      = (writePrefx "replace" [x], True)
+    f (Replace x y)    = (writePrefx "replace" [x, y], True)
     f (Ref n x)        = (writePVar n +<>+ "@" +>+ writePTerm True x, False)
     f (Ptr n x)        = (writePVar n +<>+ "&" +>+ writePTerm True x, False)
 

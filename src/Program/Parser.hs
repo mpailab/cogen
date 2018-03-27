@@ -217,7 +217,7 @@ termParser =  try (liftM2 Term symbolParser atomParser)
 table :: NameSpace m => [[Operator Text.Text () m PTerm]]
 table = [ [Prefix (reservedParser "no" >> return pNot)]
         , [Prefix (reservedParser "args" >> return Args)]
-        , [Prefix (reservedParser "replace" >> return Replace)]
+        , [Prefix (reservedParser "replace" >> termParser >>= \x -> return (Replace x))]
         , [Infix  (reservedParser "and" >> return pAnd) AssocRight]
         , [Infix  (reservedParser "or" >> return pOr) AssocRight]
         , [Infix  (reservedParser "eq" >> return Equal) AssocNone]
@@ -243,12 +243,12 @@ programParser :: NameSpace m => Parser m Program
 programParser = (reservedParser "done" >> return Program.Empty)
 
          -- Parse an assigning instruction
-         <|> do { t <- termParser
-                ; p <- (reservedOpParser "=" >> toList <$> termParser)
+         <|> do { p <- termParser
+                ; g <- (reservedOpParser "=" >> toList <$> termParser)
                        <|> (reservedOpParser "<-" >> termParser)
                 ; c <- whereParser
                 ; j <- programParser
-                ; return (Assign t p c j)
+                ; return (Assign p g c j)
                 }
 
          -- Parse an branching instruction

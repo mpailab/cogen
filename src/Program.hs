@@ -74,9 +74,9 @@ data PTerm = X Int                          -- ^ program variable
            | Or [PTerm]                     -- ^ logical or
            | Equal PTerm PTerm              -- ^ equality of objects
            | NEqual PTerm PTerm             -- ^ negation of equality of objects
-           | In PTerm PTerm                 -- ^ including for elements of set
+           | In PTerm PTerm               -- ^ including for elements of set
            | Args PTerm                     -- ^ arguments of term
-           | Replace PTerm                  -- !
+           | Replace PTerm PTerm            -- !
            | Ref Int PTerm                  -- ^ reference to program term
            | Ptr Int PTerm                  -- ^ pointer to program term
            deriving (Eq, Ord)
