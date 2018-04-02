@@ -28,6 +28,7 @@ module Program
       getPrograms,
       getPVar,
       getPVars,
+      getPVarIfExist,
       initPrograms,
       initPVars,
       namePVar,
@@ -35,10 +36,12 @@ module Program
       newPVars,
       NameSpace,
       Program(..),
+      ProgStmt(..),
       Program.Base,
       Program.Vars,
       Programs,
       PVars,
+      PMType(..),
       PTerm(..),
       setPrograms,
       setPVars
@@ -66,6 +69,7 @@ data PTerm = X Int                          -- ^ program variable
            | I Int                          -- ^ integer constant
            | B Bool                         -- ^ boolean constant
            | S LSymbol                      -- ^ user-defined logical symbol
+           | RX Int                         -- ^ number of variable to be replaced by expression
            | Term PTerm PTerm               -- ^ logical term
            | List [PTerm]                   -- ^ list of terms
            | Tuple [PTerm]                  -- ^ tuple of terms
@@ -74,33 +78,35 @@ data PTerm = X Int                          -- ^ program variable
            | Or [PTerm]                     -- ^ logical or
            | Equal PTerm PTerm              -- ^ equality of objects
            | NEqual PTerm PTerm             -- ^ negation of equality of objects
-           | In PTerm PTerm               -- ^ including for elements of set
+           | In PTerm PTerm                 -- ^ including for elements of set
            | Args PTerm                     -- ^ arguments of term
            | Replace PTerm PTerm            -- !
            | Ref Int PTerm                  -- ^ reference to program term
            | Ptr Int PTerm                  -- ^ pointer to program term
+           | Prog [ProgStmt]                -- ^ program fragment
            deriving (Eq, Ord)
 
--- | Type of program
-data Program
+-- | type of assignment statement
+data PMType = PMSelect -- ^ match patterns with list elements (l1,...,lN <- right)
+            | PMUnord  -- ^ match list pattern with list of elements in any order (left ~= right)
+            | PMAppend -- ^ appends right part to variable (left << right)
+            deriving (Eq, Ord)
 
-  -- | Assigning instruction iterates terms with respect to a given condition
-  --   and assigns them to a given program variable
+-- | Type of program statement
+data ProgStmt
   = Assign
     {
+      pmtype    :: PMType, -- ^ type of pattern matching in assignment
       pattern_  :: PTerm,  -- ^ assigned pattern
       generate  :: PTerm,  -- ^ generator of list of terms
-      condition :: PTerm,  -- ^ condition for iterating of terms
-      jump      :: Program -- ^ jump to next program fragment
+      condition :: PTerm   -- ^ condition for iterating of terms
     }
-
   -- | Branching instruction jumps to a given program fragment
   --   with respect to a given condition
   | Branch
     {
       condition :: PTerm,   -- ^ condition for the branch
-      branch    :: Program, -- ^ branch to program fragment
-      jump      :: Program  -- ^ jump to next program fragment
+      branch    :: Program  -- ^ branch to program fragment
     }
 
   -- | Switching instruction jumps to a program fragment defined by a given expression
@@ -108,22 +114,29 @@ data Program
     {
       expression :: PTerm,              -- ^ expression
       condition  :: PTerm,              -- ^ condition for switching
-      cases      :: [(PTerm, Program)], -- ^ list of pairs (pattern, program fragment)
-      jump       :: Program             -- ^ jump to next program fragment
+      cases      :: [(PTerm, Program)]  -- ^ list of pairs (pattern, program fragment)
     }
 
   -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
       action    :: PTerm,  -- ^ action
-      condition :: PTerm,  -- ^ condition of action
-      jump      :: Program -- ^ jump to next program fragment
+      condition :: PTerm   -- ^ condition of action
     }
 
-  -- | Empty represents an auxiliary program instruction
-  | Empty
+  -- | program fragment variable with delayed substitution
+  | DelayedFrag PTerm
 
-  deriving(Eq)
+  deriving(Eq,Ord)
+
+-- | Type of program
+newtype Program
+  -- | List of statements
+  = Stmts [ProgStmt]
+  --  Empty represents an auxiliary program instruction
+  -- | Empty
+
+  deriving(Eq,Ord)
 
 -- | Type of programs database
 type Programs = M.Map LSymbol Program
@@ -186,6 +199,10 @@ class Monad m => Vars m where
     let m = curNum db
         x = if 0 < n && n < m then Just (names db ! (m - n)) else Nothing
     in return x
+
+  -- | Get a program variable by its name
+  getPVarIfExist :: String -> m (Maybe PTerm)
+  getPVarIfExist name = getPVars >>= \db -> return $ X <$> M.lookup name (numbers db)
 
   -- | Get a program variable by its name
   getPVar :: String -> m PTerm

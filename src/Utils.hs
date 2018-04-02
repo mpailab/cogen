@@ -15,13 +15,16 @@ module Utils
     (
       -- exports
       echo,
-      (+>+), (+<+), (+<>+)
+      (+>+), (+<+), (+<>+),
+      (<|.), (.|>)
     )
 where
 
 -- External imports
 import           Control.Monad
 import           Debug.Trace
+import           Data.Maybe
+import           Data.Monoid
 
 -- Internal imports
 
@@ -40,3 +43,15 @@ infixr 5 +<+
 infixr 5 +<>+
 (+<>+) :: Monad m => m String -> m String -> m String
 (+<>+) = liftM2 (++)
+
+--instance Monad m => Monoid (m String) where
+--  mappend = (+<>+)
+--  mempty = return ""
+
+infixl 4 <|.
+(<|.) :: Maybe a -> a -> a
+(<|.) x y = fromMaybe y x
+
+infixl 4 .|>
+(.|>) :: a -> Maybe a -> a
+(.|>) = fromMaybe

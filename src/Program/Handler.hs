@@ -30,14 +30,15 @@ import qualified Data.Map            as M
 import           LSymbol
 import           Program
 import           Term
+import           Utils
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
 type Args = M.Map Int Expr
 
-handle :: Monad m => Program -> Args -> m ()
-handle p s = return $ evalState (run p) (Info s M.empty)
+handle :: MonadPlus m => Program -> Args -> m ()
+handle p s = evalStateT (run p) (Info s M.empty)
 
 data ExprPtr
 
@@ -63,6 +64,7 @@ data Expr = BE Bool
           | SE LSymbol
           | TE LTerm
           | PE ExprPtr
+          | PFE [ProgStmt]
           | LE [Expr]
           deriving (Eq)
 
@@ -70,6 +72,8 @@ class Expression a where
   expr :: a -> Expr
   bool :: a -> Bool
   int  :: a -> Int
+  list :: a -> [Expr]
+  prog :: a -> [ProgStmt]
 
 instance Expression Expr where
 
@@ -82,10 +86,19 @@ instance Expression Expr where
   int (IE x) = x
   int _      = error "Non-integer expression"
 
+  list (LE x) = x
+  list _      = error "Non-list expression"
+
+  prog (PFE x) = x
+  prog (LE l) = mconcat $ map prog l
+  prog _       = error "Non-program expression"
+
 instance Expression ExprPtr where
   expr = getExpr
   bool = bool . expr
-  int = int . expr
+  int  = int  . expr
+  prog = prog . expr
+  list = list . expr
 
 data Info = Info
   {
@@ -142,6 +155,8 @@ eval (Or x) = BE <$> (mapM eval x >>= foldrM (\y -> return . (bool y ||)) False)
 eval (Equal x y) = BE <$> liftM2 (==) (eval x) (eval y)
 
 eval (NEqual x y) = BE <$> liftM2 (/=) (eval x) (eval y)
+
+eval (Prog p) = return (PFE p)
 
 eval (In x y) = do
   xx <- eval x
@@ -256,6 +271,8 @@ identExpr (Tuple x) y = identExpr (List x) y
 
 identExpr _ _ = return False
 
+iftrue :: Applicative f => f () -> Bool -> f ()
+iftrue f b = when b f
 
 identPtr :: Monad m => PTerm -> Expr -> ExprPtr -> Handler m Bool
 
@@ -331,38 +348,54 @@ identC p e c = do
   unless is_match (put state) -- restore current state of Handler if necessary
   return is_match
 
-
--- | Run a program fragment
-run :: Monad m => Program -> Handler m ()
-run (Assign p g c j) = case g of
+-- | Run program of one statement
+--runStmt :: Monad m => ProgStmt -> Handler m ()
+--runStmt :: Monad m => ProgStmt -> Program -> Handler m ()
+runStmt :: MonadPlus m => ProgStmt -> Handler m () -> Handler m ()
+runStmt (Assign PMSelect p g c) runj = case g of
   List [e] -> f e
   List es  -> mapM_ f es
   _        -> eval g >>= \(LE es) -> mapM_ h es
   where
-    f e = identC p e c >>= \jump -> when jump (run j)
-    h e = identExprC p e c >>= \jump -> when jump (run j)
+    f e = identC p e c >>= iftrue runj
+    h e = identExprC p e c >>= iftrue runj
 
-run (Branch c b j) = do
+runStmt (Assign PMAppend p g c) runj = case p of
+  X i -> do
+    BE cc <- eval c
+    guard cc
+    var <- getAssignment i
+    gg <- eval g
+    let newvar = case (var <|. PFE [], gg) of
+          (PFE x, LE y) -> PFE $ x ++ mconcat (map prog y) -- if not defined, assign right part
+          _ -> error "Evaluating error: invalid operands for '<<' operator\n"
+    setAssignment i newvar
+    runj
+  _ -> error "Evaluating error: left of '<<' must be a variable\n"
+
+runStmt (Branch c b) runj = do
   s <- get             -- save current state of Handler
-  BE cond <- eval c  -- evaluate the condition
+  BE cond <- eval c    -- evaluate the condition
   when cond (run b)    -- run the branch program fragment if the condition holds
   put s                -- restore current state of Handler
-  run j                -- run the next program fragment
+  runj                 -- run the next program fragment
 
-run (Switch g c cs j) = do
+runStmt (Switch g c cs) runj = do
   s <- get             -- save current state of Handler
   runCase g c cs       -- handle a case corresponing to the expression and the condition
   put s                -- restore current state of Handler
-  run j                -- run the next program fragment
+  runj                 -- run the next program fragment
 
-run (Action a c j) = do
-  BE cond <- eval c  -- run the condition
+runStmt (Action a c) runj = do
+  BE cond <- eval c    -- run the condition
   when cond (make a)   -- make the action if the condition holds
-  run j                -- run the next program fragment
+  runj                 -- run the next program fragment
 
-run Empty = return ()
+-- | Run a program fragment
+run :: MonadPlus m => Program -> Handler m ()
+run (Stmts l) = foldr runStmt (return ()) l
 
 -- Run a case corresponing to a given expression
-runCase :: Monad m => PTerm -> PTerm -> [(PTerm, Program)] -> Handler m ()
+runCase :: MonadPlus m => PTerm -> PTerm -> [(PTerm, Program)] -> Handler m ()
 runCase e c [] = return ()
 runCase e c ((p,b):s) = identC p e c >>= \x -> if x then run b else runCase e c s

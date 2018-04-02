@@ -78,7 +78,7 @@ instance (NameSpace m, Program.Base m, MonadIO m) =>
     file <- dir +>+ "/" +>+ nameLSymbol s +<+ ".db"
     content <- liftIO (try (readFile file) :: IO (Either IOError FilePath))
     case content of
-      Left _        -> return Empty
+      Left _        -> return $ Stmts []
       Right content -> parse content file
 
   -- | Save a program of logical symbol to a database saved in given directory

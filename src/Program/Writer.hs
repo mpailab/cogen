@@ -22,11 +22,13 @@ where
 import           Control.Monad
 import           Data.List
 import           Data.Maybe
+import           Data.Monoid
 
 -- Internal imports
 import           LSymbol
 import           Program
 import           Utils
+
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -35,7 +37,7 @@ class Write a where
   write :: NameSpace m => a -> m String
 
 instance Write PTerm where
-  write = writePTerm False
+  write = writePTerm 0 False
 
 instance Write Program where
   write = writeProgram 0
@@ -50,42 +52,44 @@ writePVar n = namePVar n >>= \case
   _ -> error ("Unknown variable with number " ++ show n ++ "\n")
 
 -- | Write sequence of program terms
-writeSequence :: NameSpace m => [PTerm] -> m String
-writeSequence [t]    = writePTerm False t
-writeSequence (t:ts) = writePTerm False t +<>+ ", " +>+ writeSequence ts
+writeSequence :: NameSpace m => Int -> [PTerm] -> m String
+writeSequence ind [t]    = writePTerm ind False t
+writeSequence ind (t:ts) = writePTerm ind False t +<>+ ", " +>+ writeSequence ind ts
 
 -- | Write prefix expression
-writePrefx :: NameSpace m => String -> [PTerm] -> m String
-writePrefx x [t] = x +>+ writePTerm True t
-writePrefx x ts  = x +>+ (unwords <$> mapM (writePTerm True) ts)
+writePrefx :: NameSpace m => Int -> String -> [PTerm] -> m String
+writePrefx ind x [t] = x +>+ writePTerm ind True t
+writePrefx ind x ts  = x +>+ (unwords <$> mapM (writePTerm ind True) ts)
 
 -- | Write infix expression
-writeInfx :: NameSpace m => String -> [PTerm] -> m String
-writeInfx x ts = intercalate (" " ++ x ++ " ") <$> mapM (writePTerm True) ts
+writeInfx :: NameSpace m => Int -> String -> [PTerm] -> m String
+writeInfx ind x ts = intercalate (" " ++ x ++ " ") <$> mapM (writePTerm ind True) ts
 
 -- | Write a program term
-writePTerm :: NameSpace m => Bool -> PTerm -> m String
-writePTerm par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
+writePTerm :: NameSpace m => Int -> Bool -> PTerm -> m String
+writePTerm ind par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
   where
+    f :: NameSpace m => PTerm -> (m String, Bool)
     f (X n)            = (writePVar n, False)
     f (I i)            = (return (show i), False)
     f (B True)         = (return "True", False)
     f (B False)        = (return "False", False)
     f (S s)            = (nameLSymbol s, False)
-    f (Term x@(X _) y) = (writePTerm False x +<>+ " " +>+ writePTerm True y, True)
-    f (Term x@(S _) y) = (writePTerm False x +<>+ " " +>+ writePTerm True y, True)
-    f (List x)         = ("[" +>+ writeSequence x +<+ "]", False)
-    f (Tuple x)        = ("(" +>+ writeSequence x +<+ ")", False)
-    f (Not x)          = (writePrefx "no" [x], True)
-    f (And x)          = (writeInfx "and" x, True)
-    f (Or x)           = (writeInfx "or" x, True)
-    f (Equal x y)      = (writeInfx "eq" [x,y], True)
-    f (NEqual x y)     = (writeInfx "ne" [x,y], True)
-    f (In x y)         = (writeInfx "in" [x,y], True)
-    f (Args x)         = (writePrefx "args" [x], True)
-    f (Replace x y)    = (writePrefx "replace" [x, y], True)
-    f (Ref n x)        = (writePVar n +<>+ "@" +>+ writePTerm True x, False)
-    f (Ptr n x)        = (writePVar n +<>+ "&" +>+ writePTerm True x, False)
+    f (Term x@(X _) y) = (writePTerm ind False x +<>+ " " +>+ writePTerm ind True y, True)
+    f (Term x@(S _) y) = (writePTerm ind False x +<>+ " " +>+ writePTerm ind True y, True)
+    f (List x)         = ("[" +>+ writeSequence ind x +<+ "]", False)
+    f (Tuple x)        = ("(" +>+ writeSequence ind x +<+ ")", False)
+    f (Not x)          = (writePrefx ind "no" [x], True)
+    f (And x)          = (writeInfx ind "and" x, True)
+    f (Or x)           = (writeInfx ind "or" x, True)
+    f (Equal x y)      = (writeInfx ind "eq" [x,y], True)
+    f (NEqual x y)     = (writeInfx ind "ne" [x,y], True)
+    f (In x y)         = (writeInfx ind "in" [x,y], True)
+    f (Args x)         = (writePrefx ind "args" [x], True)
+    f (Replace x y)    = (writePrefx ind "replace" [x, y], True)
+    f (Ref n x)        = (writePVar n +<>+ "@" +>+ writePTerm ind True x, False)
+    f (Ptr n x)        = (writePVar n +<>+ "&" +>+ writePTerm ind True x, False)
+    f (Prog p)         = ("{\n" +>+ writeStmts (ind+2) p +<>+ writeIndent ind +<+ "}", False)
 
 writeIndent :: NameSpace m => Int -> m String
 writeIndent 0 = return ""
@@ -94,85 +98,73 @@ writeIndent n = writeIndent (n-1) >>= \x -> return (' ' : ' ' : x)
 writeWhere :: NameSpace m => Int -> [PTerm] -> m String
 writeWhere ind = foldr (\ t -> (+<>+) (writeIndent ind +<>+ write t +<+ "\n")) (return "")
 
--- | Write a program fragment corresponding to a given indent
-writeProgram :: NameSpace m => Int -> Program -> m String
-
+-- | Write program statement corresponding to a given indent
+writeStmt :: NameSpace m => Int -> ProgStmt -> m String
 -- | Write an assigning instruction of program fragment corresponding to a given indent
-writeProgram ind (Assign pat (List [val]) (B True) jump) =
-  writeIndent ind +<>+ write pat +<>+ " = " +>+ write val +<>+ "\n" +>+
-  writeProgram ind jump
-
-writeProgram ind (Assign pat (List [val]) (And conds) jump) =
-  writeIndent ind +<>+ write pat +<>+ " = " +>+ write val +<>+ "\n" +>+
-  writeIndent ind +<>+
-  "  where\n" +>+ writeWhere (ind+2) conds +<>+
-  writeProgram ind jump
-
-writeProgram ind (Assign pat (List [val]) cond jump) =
-  writeIndent ind +<>+ write pat +<>+ " = " +>+ write val +<>+
-  " where " +>+ write cond  +<>+ "\n" +>+
-  writeProgram ind jump
-
-writeProgram ind (Assign pat gen (B True) jump) =
-  writeIndent ind +<>+ write pat +<>+ " <- " +>+ write gen +<>+ "\n" +>+
-  writeProgram ind jump
-
-writeProgram ind (Assign pat gen (And conds) jump) =
-  writeIndent ind +<>+ write pat +<>+ " <- " +>+ write gen +<>+ "\n" +>+
-  writeIndent ind +<>+ "  where\n" +>+
-  writeWhere (ind+2) conds +<>+
-  writeProgram ind jump
-
-writeProgram ind (Assign pat gen cond jump) =
-  writeIndent ind +<>+ write pat +<>+ " <- " +>+ write gen +<>+
-  " where " +>+ write cond +<>+ "\n" +>+
-  writeProgram ind jump
+writeStmt ind (Assign tp pat gen cond) =
+  writeIndent ind +<>+ write pat +<>+ right +<>+ scond
+  where
+    right = case (tp,gen) of
+      (PMSelect, List [val]) -> " = " +>+ write val
+      (PMSelect, _) -> " <- " +>+ write gen
+      (PMUnord, _)  -> " ~= " +>+ write gen
+      (PMAppend, List frs) -> foldl (+<>+) (return "") $ map (\fr -> " << " +>+ write fr) frs
+    scond = case cond of
+      (B True)      -> return "\n"
+      (And conds)   -> "\n" +>+
+        writeIndent ind +<>+ "  where\n" +>+
+        writeWhere (ind+2) conds
+      _             -> " where " +>+ write cond +<+ "\n"
 
 -- | Write a branching instruction of program fragment corresponding to a given indent
-writeProgram ind (Branch cond br jump) =
+writeStmt ind (Branch cond br) =
   writeIndent ind +<>+ "if " +>+ write cond +<>+ "\n" +>+
   writeIndent ind +<>+ "do\n" +>+
-  writeProgram (ind+1) br +<>+
-  writeProgram ind jump
+  writeProgram (ind+1) br -- +<>+
+  --writeStmt ind jump
 
 -- | Write a switching instruction of program fragment corresponding to a given indent
-writeProgram ind (Switch expr (B True) cs jump) =
+writeStmt ind (Switch expr (B True) cs) =
   writeIndent ind +<>+ "case " +>+ write expr +<>+ " of\n" +>+
-  writeSwitchCases (ind+1) cs +<>+
-  writeProgram ind jump
+  writeSwitchCases (ind+1) cs -- +<>+
+  --writeStmt ind jump
 
-writeProgram ind (Switch expr (And conds) cs jump) =
+writeStmt ind (Switch expr (And conds) cs) =
   writeIndent ind +<>+ "case " +>+ write expr +<>+ " of\n" +>+
   writeIndent ind +<>+ "  where\n" +>+
   writeWhere (ind+2) conds +<>+
-  writeSwitchCases (ind+1) cs +<>+
-  writeProgram ind jump
+  writeSwitchCases (ind+1) cs -- +<>+
+  --writeStmt ind jump
 
-writeProgram ind (Switch expr cond cs jump) =
+writeStmt ind (Switch expr cond cs) =
   writeIndent ind +<>+ "case " +>+ write expr +<>+ " of\n" +>+
   " where " +>+ write cond +<>+ "\n" +>+
-  writeSwitchCases (ind+1) cs +<>+
-  writeProgram ind jump
+  writeSwitchCases (ind+1) cs -- +<>+
+  --writeStmt ind jump
 
 -- | Write an acting instruction of program fragment corresponding to a given indent
-writeProgram ind (Action act (B True) jump) =
-  writeIndent ind +<>+ write act +<>+ "\n" +>+
-  writeProgram ind jump
+writeStmt ind (Action act (B True)) =
+  writeIndent ind +<>+ write act +<+ "\n" -- +>+
+  --writeStmt ind jump
 
-writeProgram ind (Action act (And cs) jump) =
+writeStmt ind (Action act (And cs)) =
   writeIndent ind +<>+ write act +<>+ "\n" +>+
   writeIndent ind +<>+ "  where\n" +>+
-  writeWhere (ind+2) cs +<>+
-  writeProgram ind jump
+  writeWhere (ind+2) cs -- +<>+
+  --writeStmt ind jump
 
-writeProgram ind (Action act cond jump) =
+writeStmt ind (Action act cond) =
   writeIndent ind +<>+ write act +<>+
-  " where " +>+ write cond +<>+ "\n" +>+
-  writeProgram ind jump
+  " where " +>+ write cond +<+ "\n" -- +>+
+  --writeStmt ind jump
 
--- | Write an empty program fragment corresponding to a given indent
-writeProgram ind Empty =
-  writeIndent ind +<+ "done\n"
+-- | Write a program fragment corresponding to a given indent
+writeStmts :: NameSpace m => Int -> [ProgStmt] -> m String
+writeStmts ind s = foldl (+<>+) (return "") (map (writeStmt ind) s)
+
+-- | Write a program fragment corresponding to a given indent
+writeProgram :: NameSpace m => Int -> Program -> m String
+writeProgram ind (Stmts s) = writeStmts ind s +<>+ writeIndent ind +<+ "done\n"
 
 writeSwitchCases :: NameSpace m => Int -> [(PTerm, Program)] -> m String
 writeSwitchCases ind ((pat,prog):cs) =

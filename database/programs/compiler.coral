@@ -18,14 +18,159 @@ theorem [t1]
 do
   if Compiler
   do -- Parse the theorem of inference rule
-    case t1 of
-      forall [boundVariables t2, premises t3, conclusion [t4]]
+    case (Header,t1) of
+      (_, forall [boundVariables t2, premises t3, conclusion [concl]])
       do
         Bounds = t2
         Premises = t3
-        t7 [t5,t6] = t4 where t7 in [equality, equivalence]
-        (From,To) = LeftToRight ? (t5,t6) : (t6,t5)
+        case (Header, concl) of
+          (h, t7 [t5, t6]) where t7 in [equality, equivalence] and h in [left-to-right, right-to-left]
+          do
+            (From,To) = LeftToRight ? (t5,t6) : (t6,t5)
+            place = (premise in Filters ? { premises() } :
+                     условие in Filters ? { условия() } : { premises() ++ условия()})
+            Identification << {
+              ..&ptr.. <- $place where *ptr = $From -- ptr становтся указателем на подтерм,
+                                       -- идентифицираванный с шаблоном From
+            }
+            Actions << {
+              replace ptr $To
+            }
+            done
+          (h [второйтерм], equivalence [conjunction* b, c])
+          (h [второйтерм], equivalence [c, conjunction* b]) where h in [заменаусловия, заменатермов]
+          do
+            list = case h of
+              заменаусловия -> условия
+              заменатермов -> premises
+            Identification << {
+              describe = type
+              $b ++other ~= $list
+            }
+            Actions << {
+              $list := $c:other
+            }
+            done
+          (связка, equivalence [exists [boundVariables y, conjunction* b], c])
+          do
+            Identification << { -- добавляем операторы в идентификационную часть приёма
+              params z <- goals
+              $b ++ other ~= premises where -- унификация множества термов, названия переменных, как в теореме
+                $y `subset` z   -- все переменные из списка y идентифицировались с параметрами задачи
+                freeVariables(other) `intersect` $y = [] -- переменных из списка y нет среди оставшихся посылок
+                @PremiseMatchConditions -- дополнительные условия, которые могут быть добавлены потом
+                                        -- путём определения переменной PremiseMatchConditions
+            }
+            Actions << { -- добавляем операторы в действия при применении приёма
+              replace (params z) (params (z `setminus` $y)) in goals
+              premises := $с:other
+            }
+          done
+          (вывод, _) -- 10.2.2 пункт 1
+          do
+             -- Идентифицирующая часть полностью определяется указателями: какую посылку как идентифицировать
+            Actions << {
+              premises := concl:premises() -- premices() в правой части означает, что это вызов функции, а не логический символ
+            }
+            done
+          (выводусловия, _) -- 10.2.2 пункт 2
+          do
+            Actions << {
+              условия := concl:условия
+            }
+            done
+          (подборзначений, _) -- 10.2.3 пункт 1
+          do
+            result = [t3!i | подборзначений [i] <- Specifiers]
+            Identification << {
+              $concl:other ~= условия
+            }
+            Actions << {
+              условия := $result ++ other
+            }
+          done
+          (параметризация, h [b, exists [boundVariables y, conjunction* f]]) -- 10.2.3 пункт 2
+            where h in [equivalence, implies]
+          do
+            result = [t3!i | подборзначений [i] <- Specifiers]
+            if h=implies do Identification << { example in goals } done -- in вместо <- означает, что ищем только 1 экземпляр
+            Identification << { $b:other ~= условия }
+            Subproblem << {
+              $y = newvars -- y становится равно новым переменным, ещё не участвовавшим в задаче
+              subproblem = [описать, premises(), $f++other, (unknowns ($y++x)):gs] where (unknowns x):gs ~= goals
+            }
+            Actions << {
+              subans = solve(subproblem)
+              if subans != fail -- оператор "не равно" как в C++?
+              do
+                answer simplify(exists [boundVariables $y, subans]) -- создаёт и решает задачу на упрощение в условиях текущей задачи
+                -- оператор answer выдаёт ответ задачи
+              done
+            }
+          done
+          (свёртка, forall [boundVariables y, premises b, conclusion c]) -- 10.2.3 пункт 3
+          do
+            Identification << {
+              доказать = type()
+              [$c] = условия where varpattern [$y] -- varpattern означает, что на место y можно подставлять только переменные
+              $b++other ~= premises() where
+                varpattern [$y]
+                freeVariables(other) 'intersect' [$y] = []
+                @PremiseMatchConditions
+            }
+            Action { answer true } -- в случае срабатывания приёма сразу выдаётся ответ "истина"
+          done
+      done
+      (_, явное [x, f@[_], g@[_], h@[_]]) -- 10.2.4 рункт 1; таких 96 приёмов
+      do -- Не понятно пока, как эффективно обрабатывать этот код
+        nxvar = freeVariables(h) -- все переменные из термов списка h, кроме x
+                            -- функцию freeVariables для удобства можно сделать рекурсивной по вложенным спискам
+        Identification << {
+          $f++notf ~= условия() where varpattern $x, unknowns ($x:_) in goals() -- идентифицируем список f с условиями
+          gl = []} << [{ ++ [$p | $p <- notf where varpattern [$x]]} | p <- g] << { -- идентифицируем список g с условиями с возможностью повторения
+          notfg = notf `setminus` gl where not ($x in freeVariables(notfg)) -- оставшиеся условия
+        }
+        if h!=[] do Identification << { $h++other ~= notfg } done
+         -- u(V) в шаблоне означает, что все свободные переменные идентифицируемого терма должны быть из V
+        Action << {
+          prepareanswer ($f++gl) $h -- редактирование и выдача ответа. В решателе -- оператор редакторответа
+        }
+      done
+      (ответзадачи, conjunction* a)  -- 10.2.4 рункт 2; таких 25 приёмов
+      do -- Не понятно пока, как эффективно обрабатывать этот код
+        if (серия multi) in указатели do g = [a!i | i in multi] done
+        else do g = [] done -- g -- все термы списка a, которые могут встретиться несколько раз
+        f = a `setminus` g -- все термы списка a, которые должны встретиться ровно один раз
+        Identification << {
+          $f++notf ~= условия() -- идентифицируем список f с условиями
+          notf ~= []} << [{ ++ [$p | $p <- notf]} | p <- g] -- идентифицируем список g с условиями с возможностью повторения
+         Action << {
+           prepareanswer условия() [] -- редактирование и выдача ответа. в решателе -- оператор редакторответа
+         }
+      done
+      (замещениеусловий, замещениеусловий a) -- 10.2.5 пункт 1
+      do
+        Identification << {
+          исследовать = type()
+          $a <- premises()
+        }
+        Action << {
+          replaceconditions [$a] -- ??? в ЛОСе это оператор замещениеусловий. очень неконкретное описание, что он делает.
+        }
+      done
+      (замечание, forall [boundVariables x, premises a, b])
+      do
+        Premises = a
+        if b=context c
+        do
+          Identification << {
+            ..$c.. <- premises()
+          }
         done
+        Identification << {
+          $a++_ ~= premises()
+        }
+      done
     done
   done
 

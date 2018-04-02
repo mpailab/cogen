@@ -42,8 +42,11 @@ import           Utils
 ------------------------------------------------------------------------------------------
 -- Data types and classes declaration
 
+type PState = Bool
+initState = False
+
 -- | Parser type
-type Parser = ParsecT Text.Text ()
+type Parser = ParsecT Text.Text PState
 
 -- | Parser instance for treatment of logical symbols in underlying monad
 instance NameSpace m => LSymbol.Base (Parser m) where
@@ -64,7 +67,7 @@ class Parse a where
 
 -- | Parse instance for programs
 instance Parse Program where
-  parse str source = runParserT programParser () source (Text.pack str) >>= \case
+  parse str source = runParserT programParser initState source (Text.pack str) >>= \case
     Right p   -> return p
     Left  err -> (error . errorToString) err
 
@@ -81,7 +84,7 @@ showPos pos = file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")"
     j = sourceColumn pos
 
 -- | This is a minimal token definition for Coral language.
-coralDef :: NameSpace m => GenLanguageDef Text.Text () m
+coralDef :: NameSpace m => GenLanguageDef Text.Text PState m
 coralDef = emptyDef
   { commentStart   = "{-"
   , commentEnd     = "-}"
@@ -91,7 +94,7 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-", "@", "&"]
+  , reservedOpNames= ["=", "<-", "@", "&", "$", "<<", "~="]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "and", "or", "eq", "ne", "in",
                       "args", "replace"]
@@ -99,7 +102,7 @@ coralDef = emptyDef
   }
 
 -- | Lexer for Coral language - collection of lexical parsers for tokens
-coralLexer :: NameSpace m => GenTokenParser Text.Text () m
+coralLexer :: NameSpace m => GenTokenParser Text.Text PState m
 coralLexer = makeTokenParser coralDef
 
 -- | Lexeme parser @parensParser p@ parses @p@ enclosed in parenthesis,
@@ -170,6 +173,15 @@ varParser = identifierParser >>= \name -> getLSymbol name >>= \case
   Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
   Nothing -> getPVar name
 
+-- | Parser of variable references in program fragments
+varRefParser :: NameSpace m => Parser m PTerm
+varRefParser = getState >>= \case
+  True ->
+    reservedOpParser "$" *> identifierParser >>= \name -> getPVarIfExist name >>= \case
+    Just s  -> return s
+    Nothing -> unexpected ("Variable " ++ name ++ " not in scope.\n")
+  False -> unexpected "Variable reference outside of program fragment.\n"
+
 -- | Parser of tuples of program terms
 tupleParser :: NameSpace m => Parser m PTerm
 tupleParser = do
@@ -200,6 +212,7 @@ ptrParser = do
 atomParser :: NameSpace m => Parser m PTerm
 atomParser =  intParser
           <|> boolParser
+          <|> varRefParser
           <|> refParser
           <|> ptrParser
           <|> symbolParser
@@ -214,7 +227,7 @@ termParser =  try (liftM2 Term symbolParser atomParser)
           <?> "PTerm"
 
 -- Table for parsing of composite program terms
-table :: NameSpace m => [[Operator Text.Text () m PTerm]]
+table :: NameSpace m => [[Operator Text.Text PState m PTerm]]
 table = [ [Prefix (reservedParser "no" >> return pNot)]
         , [Prefix (reservedParser "args" >> return Args)]
         , [Prefix (reservedParser "replace" >> termParser >>= \x -> return (Replace x))]
@@ -238,25 +251,36 @@ whereParser =
 doParser :: NameSpace m => Parser m Program
 doParser = reservedParser "do" >> programParser
 
--- | Parser of programs
-programParser :: NameSpace m => Parser m Program
-programParser = (reservedParser "done" >> return Program.Empty)
+fragParser :: NameSpace m => Parser m PTerm
+fragParser = do
+  string "{"
+  st <- getState
+  putState True
+  res <- many stmtParser
+  string "}"
+  putState st
+  return $ Prog res
 
+pair x y = (x,y)
+
+-- | Parser of statements
+stmtParser :: NameSpace m => Parser m ProgStmt
+stmtParser =
          -- Parse an assigning instruction
-         <|> do { p <- termParser
-                ; g <- (reservedOpParser "=" >> toList <$> termParser)
-                       <|> (reservedOpParser "<-" >> termParser)
+             do { p <- termParser
+                ; (tp,g) <- pair PMSelect <$> ((reservedOpParser "=" >> toList <$> termParser)
+                       <|> (reservedOpParser "<-" >> termParser))
+                       <|> pair PMUnord <$> (reservedOpParser "=~" >> termParser)
+                       <|> pair PMAppend . List <$> many1 (reservedOpParser "<<" >> termParser)
                 ; c <- whereParser
-                ; j <- programParser
-                ; return (Assign p g c j)
+                ; return (Assign tp p g c)
                 }
 
          -- Parse an branching instruction
          <|> do { reservedParser "if"
                 ; c <- termParser
                 ; b <- doParser
-                ; j <- programParser
-                ; return (Branch c b j)
+                ; return (Branch c b)
                 }
 
          -- Parse an switching instruction
@@ -265,17 +289,20 @@ programParser = (reservedParser "done" >> return Program.Empty)
                 ; reservedParser "of"
                 ; c <- whereParser
                 ; cs <- many1 $ liftM2 (,) termParser doParser
-                ; j <- programParser
-                ; return (Switch e c cs j)
+                ; return (Switch e c cs)
                 }
 
          -- Parse an acting instruction
          <|> do { t <- termParser
                 ; c <- whereParser
-                ; j <- programParser
-                ; return (Action t c j)
+                ; return (Action t c)
                 }
+         <?> "Statement"
 
+-- | Parser of programs
+programParser :: NameSpace m => Parser m Program
+programParser =
+         (many stmtParser <* reservedParser "done" >>= \l -> return $ Stmts l)
          <?> "Program"
 
 ------------------------------------------------------------------------------------------
