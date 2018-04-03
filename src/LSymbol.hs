@@ -29,7 +29,7 @@ module LSymbol
       getLSymbols,
       initLSymbols,
       listLSymbols,
-      LSymbol,
+      LSymbol(..),
       LSymbols,
       LTerm,
       nameLSymbol,
@@ -55,9 +55,9 @@ import           Term
 -- Data and type declaration
 
 -- | Type of logical symbols
-data LSymbol = X Int                    -- ^ variable
-             | I Int                    -- ^ integer constant
-             | S Int                    -- ^ user-defined logical symbol
+data LSymbol = XL Int                    -- ^ variable
+             | IL Int                    -- ^ integer constant
+             | SL Int                    -- ^ user-defined logical symbol
              deriving (Eq, Ord)
 
 -- | Type for informational structure of logical symbol
@@ -99,7 +99,7 @@ class Monad m => Base m where
 
   -- | Get the name of a logical symbol
   nameLSymbol :: LSymbol -> m String
-  nameLSymbol (S n) = getLSymbols >>= \db -> return (name_ $ fst db ! n)
+  nameLSymbol (SL n) = getLSymbols >>= \db -> return (name_ $ fst db ! n)
 
   -- | Get a logical symbol by the name or synonym
   getLSymbol :: String -> m (Maybe LSymbol)
@@ -115,7 +115,7 @@ class Monad m => Base m where
     db <- getLSymbols
     let (f,l) = bounds $ fst db
     let i = l+1
-    let sym = S i
+    let sym = SL i
     let a = listArray (f,i) $ elems (fst db) ++ [Symbol i n s c d]
     let b = foldr (\x y -> M.insert x sym y) (M.insert n sym $ snd db) s
     setLSymbols (a,b)
@@ -129,9 +129,9 @@ class Monad m => Base m where
 
 -- Show instance for logical symbols
 instance Show LSymbol where
-  show (X i) = 'x' : show i
-  show (I i) = 'i' : show i
-  show (S i) = 's' : show i
+  show (XL i) = 'x' : show i
+  show (IL i) = 'i' : show i
+  show (SL i) = 's' : show i
 
 -- Show instance for informational structure of logical symbols
 instance Show LSymbolInfo where
@@ -148,9 +148,9 @@ instance Show LSymbolInfo where
 
 -- | Read instance for logical symbols
 instance Read LSymbol where
-  readsPrec p r =  [ (X (read x), "") | ('x':x,"") <- lex r, all isDigit x ]
-                ++ [ (I (read x), "") | ('i':x,"") <- lex r, all isDigit x ]
-                ++ [ (S (read x), "") | ('s':x,"") <- lex r, all isDigit x ]
+  readsPrec p r =  [ (XL (read x), "") | ('x':x,"") <- lex r, all isDigit x ]
+                ++ [ (IL (read x), "") | ('i':x,"") <- lex r, all isDigit x ]
+                ++ [ (SL (read x), "") | ('s':x,"") <- lex r, all isDigit x ]
 
 -- | Read instance for informational structure of logical symbols
 instance Read LSymbolInfo where
@@ -188,7 +188,7 @@ instance MonadIO m => Database String LSymbols m where
           f si db = let i = id_ si
                         n = name_ si
                         s = synonyms_ si
-                        sym = S i
+                        sym = SL i
                     in foldr (\x y -> M.insert x sym y) (M.insert n sym db) s
 
   -- | Save a database of logical symbols to a given file

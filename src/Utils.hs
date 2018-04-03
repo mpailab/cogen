@@ -16,7 +16,8 @@ module Utils
       -- exports
       echo,
       (+>+), (+<+), (+<>+),
-      (<|.), (.|>)
+      (<|.), (.|>),
+      (/@)
     )
 where
 
@@ -55,3 +56,6 @@ infixl 4 <|.
 infixl 4 .|>
 (.|>) :: a -> Maybe a -> a
 (.|>) = fromMaybe
+
+infixr 3 /@
+(/@) = map
