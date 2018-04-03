@@ -24,6 +24,7 @@ import           Data.List
 import qualified Data.Map               as Map
 import           Data.Maybe
 import qualified Data.Text              as Text
+import           Data.Functor
 import           Text.Parsec
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
@@ -43,6 +44,7 @@ import           Utils
 -- Data types and classes declaration
 
 type PState = Bool
+initState :: PState
 initState = False
 
 -- | Parser type
@@ -94,7 +96,7 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-", "@", "&", "$", "<<", "~="]
+  , reservedOpNames= ["=", "<-", "@", "&", "$", "<<", "~=", "_", "__", ".."]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "and", "or", "eq", "ne", "in",
                       "args", "replace"]
@@ -218,6 +220,7 @@ atomParser =  intParser
           <|> symbolParser
           <|> tupleParser
           <|> listParser
+          <|> (reservedOpParser "_" $> Underscore)
           <?> "atomic PTerm"
 
 -- | Parser of program terms
@@ -261,17 +264,15 @@ fragParser = do
   putState st
   return $ Prog res
 
-pair x y = (x,y)
-
 -- | Parser of statements
 stmtParser :: NameSpace m => Parser m ProgStmt
 stmtParser =
          -- Parse an assigning instruction
              do { p <- termParser
-                ; (tp,g) <- pair PMSelect <$> ((reservedOpParser "=" >> toList <$> termParser)
+                ; (tp,g) <- (,) PMSelect <$> ((reservedOpParser "=" >> toList <$> termParser)
                        <|> (reservedOpParser "<-" >> termParser))
-                       <|> pair PMUnord <$> (reservedOpParser "=~" >> termParser)
-                       <|> pair PMAppend . List <$> many1 (reservedOpParser "<<" >> termParser)
+                       <|> (,) PMUnord <$> (reservedOpParser "=~" >> termParser)
+                       <|> (,) PMAppend . List <$> many1 (reservedOpParser "<<" >> termParser)
                 ; c <- whereParser
                 ; return (Assign tp p g c)
                 }

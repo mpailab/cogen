@@ -58,4 +58,5 @@ infixl 4 .|>
 (.|>) = fromMaybe
 
 infixr 3 /@
+(/@) :: (a -> b) -> [a] -> [b]
 (/@) = map

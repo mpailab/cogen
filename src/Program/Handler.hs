@@ -170,6 +170,8 @@ eval (Args x) = eval x >>= \case
       TE t = expr p
       getTermRef (i,x) = PE (IPtr (TE x) p (\(TE u) (TE v) -> TE (Term.change u i v)))
 
+eval Underscore = error "Evaluating error: cannot evaluate '_' symbol\n"
+
 replace :: Monad m => Expr -> Expr -> Handler m ()
 replace (PE (RPtr _ sw)) = sw
 replace (PE (IPtr _ par sw)) = let re = expr par in replace (PE par) . sw re
@@ -213,6 +215,8 @@ ident (S x) t = eval t >>= \case
   (SE y)
     | x == y    -> return True
     | otherwise -> return False
+
+ident Underscore _ = return True
 
 ident (Term (S x) p) (Term (S y) q)
   | x /= y    = return False
@@ -301,6 +305,8 @@ identPtr (I x) (IE y) _
 identPtr (B x) (BE y) _
   | x == y    = return True
   | otherwise = return False
+
+identPtr Underscore _ _ = return True
 
 identPtr (S x) (SE y) _
   | x == y    = return True
