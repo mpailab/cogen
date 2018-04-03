@@ -19,13 +19,20 @@ import           Program.Writer
 
 -- | Test implementation
 test :: Integer -> Global Bool
-test num = case num of
-  1 -> do
+test 1 = do
     load "database/lsymbols.db" >>= setLSymbols
     let file = "database/programs/before.coral"
     prog_str <- liftIO $ readFile file
     prog :: Program <- parse prog_str file
     liftIO . writeFile "database/programs/after.coral" =<< write prog
+    return True
+
+test 2 = do
+    load "database/lsymbols.db" >>= setLSymbols
+    let file = "database/programs/before1.coral"
+    prog_str <- liftIO $ readFile file
+    prog :: Program <- parse prog_str file
+    liftIO . writeFile "database/programs/after1.coral" =<< write prog
     return True
 
 -- | Run test with number num
@@ -39,6 +46,6 @@ main :: IO ()
 main = do
   createDirectoryIfMissing False "tmp"
   putStrLn "Run tests:"
-  let test_num = 1 in mapM runTest [1..test_num]
+  let test_num = 2 in mapM runTest [1..test_num]
   putStrLn "Done"
   removeDirectoryRecursive "tmp"

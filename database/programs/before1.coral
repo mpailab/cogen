@@ -1,20 +1,4 @@
 case arg of
-  header [t1]
-  do
-    if Compiler
-    do -- Parse the header of inference rule
-      case t1 of
-        left-to-right
-        do
-          LeftToRight = True
-          done
-        right-to-left
-        do
-          LeftToRight = False
-          done
-      done
-    done
-
   theorem [t1]
   do
     if Compiler
@@ -25,19 +9,6 @@ case arg of
           Bounds = t2
           Premises = t3
           case (Header, concl) of
-            (h, t7 [t5, t6]) where t7 in [equality, equivalence] and h in [left-to-right, right-to-left]
-            do
-              (From,To) = LeftToRight ? (t5,t6) : (t6,t5)
-              place = (premise in Filters ? { premises() } :
-                       условие in Filters ? { условия() } : { premises() ++ условия()})
-              Identification << {
-                ..&ptr.. <- $place where *ptr = $From -- ptr становтся указателем на подтерм,
-                                         -- идентифицираванный с шаблоном From
-              }
-              Actions << {
-                replace ptr $To
-              }
-              done
             (h [второйтерм], equivalence [conjunction* b, c])
             (h [второйтерм], equivalence [c, conjunction* b]) where h in [заменаусловия, заменатермов]
             do
@@ -121,56 +92,6 @@ case arg of
               }
               Action { answer true } -- в случае срабатывания приёма сразу выдаётся ответ "истина"
             done
-        done
-        (_, явное [x, f@[_], g@[_], h@[_]]) -- 10.2.4 рункт 1; таких 96 приёмов
-        do -- Не понятно пока, как эффективно обрабатывать этот код
-          nxvar = freeVariables(h) -- все переменные из термов списка h, кроме x
-                              -- функцию freeVariables для удобства можно сделать рекурсивной по вложенным спискам
-          Identification << {
-            $f++notf ~= условия() where varpattern $x, unknowns ($x:_) in goals() -- идентифицируем список f с условиями
-            gl = []} << [{ ++ [$p | $p <- notf where varpattern [$x]]} | p <- g] << { -- идентифицируем список g с условиями с возможностью повторения
-            notfg = notf `setminus` gl where not ($x in freeVariables(notfg)) -- оставшиеся условия
-          }
-          if h!=[] do Identification << { $h++other ~= notfg } done
-           -- u(V) в шаблоне означает, что все свободные переменные идентифицируемого терма должны быть из V
-          Action << {
-            prepareanswer ($f++gl) $h -- редактирование и выдача ответа. В решателе -- оператор редакторответа
-          }
-        done
-        (ответзадачи, conjunction* a)  -- 10.2.4 рункт 2; таких 25 приёмов
-        do -- Не понятно пока, как эффективно обрабатывать этот код
-          if (серия multi) in указатели do g = [a!i | i in multi] done
-          else do g = [] done -- g -- все термы списка a, которые могут встретиться несколько раз
-          f = a `setminus` g -- все термы списка a, которые должны встретиться ровно один раз
-          Identification << {
-            $f++notf ~= условия() -- идентифицируем список f с условиями
-            notf ~= []} << [{ ++ [$p | $p <- notf]} | p <- g] -- идентифицируем список g с условиями с возможностью повторения
-           Action << {
-             prepareanswer условия() [] -- редактирование и выдача ответа. в решателе -- оператор редакторответа
-           }
-        done
-        (замещениеусловий, замещениеусловий a) -- 10.2.5 пункт 1
-        do
-          Identification << {
-            исследовать = type()
-            $a <- premises()
-          }
-          Action << {
-            replaceconditions [$a] -- ??? в ЛОСе это оператор замещениеусловий. очень неконкретное описание, что он делает.
-          }
-        done
-        (замечание, forall [boundVariables x, premises a, b])
-        do
-          Premises = a
-          if b=context c
-          do
-            Identification << {
-              ..$c.. <- premises()
-            }
-          done
-          Identification << {
-            $a++_ ~= premises()
-          }
         done
       done
     done

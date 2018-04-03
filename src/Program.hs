@@ -69,6 +69,7 @@ data PTerm = X Int                          -- ^ program variable
            | I Int                          -- ^ integer constant
            | B Bool                         -- ^ boolean constant
            | S LSymbol                      -- ^ user-defined logical symbol
+           | Underscore                     -- ^ symbol '_'
            | RX Int                         -- ^ number of variable to be replaced by expression
            | Term PTerm PTerm               -- ^ logical term
            | List [PTerm]                   -- ^ list of terms

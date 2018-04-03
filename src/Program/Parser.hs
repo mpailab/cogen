@@ -24,6 +24,7 @@ import           Data.List
 import qualified Data.Map               as Map
 import           Data.Maybe
 import qualified Data.Text              as Text
+import           Data.Functor
 import           Text.Parsec
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
@@ -42,8 +43,18 @@ import           Utils
 ------------------------------------------------------------------------------------------
 -- Data types and classes declaration
 
-type PState = Bool
-initState = False
+data PState = PSt {
+    inFrag :: Bool,
+    indents :: [Int]
+  }
+initState :: PState
+initState = PSt{ inFrag=False, indents=[] }
+pushIndent st i = st {indents = i:is} where is = indents st
+popIndent st = st {indents = is} where _:is = indents st
+
+-- indented f p = s
+
+
 
 -- | Parser type
 type Parser = ParsecT Text.Text PState
@@ -94,16 +105,25 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-", "@", "&", "$", "<<", "~="]
+  , reservedOpNames= ["=", "<-", "@", "&", "$", "<<", "~=", "_", "__", ".."]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "and", "or", "eq", "ne", "in",
                       "args", "replace"]
   , caseSensitive  = True
   }
 
+
+
 -- | Lexer for Coral language - collection of lexical parsers for tokens
 coralLexer :: NameSpace m => GenTokenParser Text.Text PState m
 coralLexer = makeTokenParser coralDef
+
+wsp = whiteSpace coralLexer
+
+atIndent :: NameSpace m => Int -> Parser m ()
+atIndent n = wsp >> try (getPosition >>= \pos ->
+    unless (sourceColumn pos == n) parserZero
+  )
 
 -- | Lexeme parser @parensParser p@ parses @p@ enclosed in parenthesis,
 -- returning the value of @p@.
@@ -179,8 +199,8 @@ varRefParser = getState >>= \case
   True ->
     reservedOpParser "$" *> identifierParser >>= \name -> getPVarIfExist name >>= \case
     Just s  -> return s
-    Nothing -> unexpected ("Variable " ++ name ++ " not in scope.\n")
-  False -> unexpected "Variable reference outside of program fragment.\n"
+    Nothing -> unexpected ("Variable " ++ name ++ " not in scope.")
+  False -> unexpected "Variable reference outside of program fragment."
 
 -- | Parser of tuples of program terms
 tupleParser :: NameSpace m => Parser m PTerm
@@ -218,6 +238,7 @@ atomParser =  intParser
           <|> symbolParser
           <|> tupleParser
           <|> listParser
+          <|> (reservedOpParser "_" $> Underscore)
           <?> "atomic PTerm"
 
 -- | Parser of program terms
@@ -261,17 +282,15 @@ fragParser = do
   putState st
   return $ Prog res
 
-pair x y = (x,y)
-
 -- | Parser of statements
 stmtParser :: NameSpace m => Parser m ProgStmt
 stmtParser =
          -- Parse an assigning instruction
              do { p <- termParser
-                ; (tp,g) <- pair PMSelect <$> ((reservedOpParser "=" >> toList <$> termParser)
+                ; (tp,g) <- (,) PMSelect <$> ((reservedOpParser "=" >> toList <$> termParser)
                        <|> (reservedOpParser "<-" >> termParser))
-                       <|> pair PMUnord <$> (reservedOpParser "=~" >> termParser)
-                       <|> pair PMAppend . List <$> many1 (reservedOpParser "<<" >> termParser)
+                       <|> (,) PMUnord <$> (reservedOpParser "=~" >> termParser)
+                       <|> (,) PMAppend . List <$> many1 (reservedOpParser "<<" >> termParser)
                 ; c <- whereParser
                 ; return (Assign tp p g c)
                 }
