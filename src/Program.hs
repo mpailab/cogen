@@ -38,8 +38,14 @@ module Program
       Program.Base,
       Program.Vars,
       Programs,
+      PAggr,
+      PBool(..),
+      PComp(..),
+      PEntry(..),
+      PExpr,
+      PSymbol(..),
+      PTerm,
       PVars,
-      PTerm(..),
       setPrograms,
       setPVars
     )
@@ -55,16 +61,17 @@ import           Data.Maybe
 import           Text.Regex.Posix
 
 -- Internal imports
+import           Expr
 import           LSymbol
+import           Term
 import           Utils
-import Expr
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
 data PSymbol
-  = Var Int
-  | Sym LSymbol
+  = X Int
+  | S LSymbol
   deriving (Eq)
 
 data PEntry
@@ -75,24 +82,19 @@ data PEntry
 
 type PTerm = Term PSymbol
 
-data PSet
-  = Var Int
-  | Set [PAggr]
-  deriving (Eq)
-
 data PBool
   = Const Bool
   | Equal PTerm PTerm
   | NEqual PTerm PTerm
-  | In PTerm PSet
+  | In PTerm PComp
   | Not PBool
   | And [PBool]
   | Or [PBool]
   deriving (Eq)
 
-type PAggr = Aggregate PSymbol Entry
+type PAggr = Aggregate PSymbol PEntry
 
-type PComp = Composite PSymbol Entry
+type PComp = Composite PSymbol PEntry
 
 -- | Type of program terms
 type PExpr = Expr PSymbol PEntry PBool
@@ -213,12 +215,12 @@ class Monad m => Vars m where
   -- | Get a program variable by its name
   getPVar :: String -> m PSymbol
   getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
-    Just n  -> return (PSymbol.Var n)
+    Just n  -> return (X n)
     Nothing -> let n = curNum db
                    new_db = PVars (listArray (1,n) (name : elems (names db)))
                                   (M.insert name n (numbers db))
                                   (n + 1)
-               in setPVars new_db >> return (PSymbol.Var n)
+               in setPVars new_db >> return (X n)
 
 -- | Class for namespace of logical symbols and program variables
 class (LSymbol.Base m, Program.Vars m) => NameSpace m

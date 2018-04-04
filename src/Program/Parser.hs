@@ -35,8 +35,10 @@ import           Text.Parsec.Text       hiding (Parser)
 import           Text.Parsec.Token
 
 -- Internal imports
+import           Expr
 import           LSymbol
 import           Program
+import           Term
 import           Utils
 
 ------------------------------------------------------------------------------------------
@@ -161,7 +163,7 @@ intParser = fromInteger <$> naturalParser
 -- | Parser of symbols (logical symbols or variables)
 symbolParser :: NameSpace m => Parser m PSymbol
 symbolParser = identifierParser >>= \name -> getLSymbol name >>= \case
-  Just s  -> return (PSymbol.Sym s)
+  Just s  -> return (S s)
   Nothing -> getPVar name
 
 -- | Parser of program variables
@@ -171,70 +173,65 @@ varParser = identifierParser >>= \name -> getLSymbol name >>= \case
   Nothing -> getPVar name
 
 entryParser :: NameSpace m => Parser m PEntry
-entryParser =  try do { PSymbol.Var x <- varParser
-                      ; reservedOpParser "&"
-                      ; y <- aggrParser
-                      ; return (Ptr x y)
-                      }
-           <|> try do { PSymbol.Var x <- varParser
-                      ; reservedOpParser "@"
-                      ; y <- aggrParser
-                      ; return (Ref x y)
-                      }
+entryParser =  try ( do { X n <- varParser
+                        ; reservedOpParser "&"
+                        ; expr <- aggrParser
+                        ; return (Ptr n expr)
+                        } )
+           <|> try ( do { X n <- varParser
+                        ; reservedOpParser "@"
+                        ; expr <- aggrParser
+                        ; return (Ref n expr)
+                        } )
            <?> "entry"
 
 aggrParser :: NameSpace m => Parser m PAggr
-aggrParser =  (Comp <$> compParser)
-          <|> (Int  <$> intParser)
-          <|> (Ent  <$> entryParser)
-          <|> (Sym  <$> symbolParser)
+aggrParser =  try (Comp <$> compParser)
+          <|> try (Int  <$> intParser)
+          <|> try (Entr <$> entryParser)
+          <|> try (Sym  <$> symbolParser)
           <?> "aggregate"
 
 termParser :: NameSpace m => Parser m PTerm
-termParser =  try do { sym <- symbolParser
-                     ; terms <- bracketsParser (commaSepParser termParser))
-                     ; return (sym :> terms)
-                     }
-          <|> try do { sym <- symbolParser
-                     ; var <- varParser
-                     ; return (sym :>> var)
-                     }
-          <|> try do { sym <- symbolParser
-                     ; return (T sym)
-                     }
+termParser =  try ( do { sym <- symbolParser
+                       ; terms <- bracketsParser (commaSepParser termParser)
+                       ; return (sym :> terms)
+                       } )
+          <|> try ( do { sym <- symbolParser
+                       ; var <- varParser
+                       ; return (sym :>> var)
+                       } )
+          <|> try ( do { sym <- symbolParser
+                       ; return (T sym)
+                       } )
           <?> "term"
 
 compParser :: NameSpace m => Parser m PComp
-compParser =  (List  <$> bracketsParser (commaSepParser aggrParser))
-          <|> (Tuple <$> parensParser   (commaSepParser aggrParser))
-          <|> (Set   <$> bracesParser   (commaSepParser aggrParser))
-          <|> (Term  <$> termParser)
+compParser =  try (List  <$> bracketsParser (commaSepParser aggrParser))
+          <|> try (Tuple <$> parensParser   (commaSepParser aggrParser))
+          <|> try (Set   <$> bracesParser   (commaSepParser aggrParser))
+          <|> try (Term  <$> termParser)
           <?> "composite"
 
-setParser :: NameSpace m => Parser m PSet
-setParser =  (Set <$> bracketsParser (commaSepParser termParser))
-         <|> (varParser >>= \(PSymbol.Var x) -> return (PSet.Var x))
-         <?> "set"
-
 relationParser :: NameSpace m => Parser m PBool
-relationParser =  try do {
-                         ; left <- termParser
-                         ; reservedParser "eq"
-                         ; right <- termParser
-                         ; return (Equal left right)
-                         }
-              <|> try do {
-                         ; left <- termParser
-                         ; reservedParser "ne"
-                         ; right <- termParser
-                         ; return (NEqual left right)
-                         }
-              <|> try do {
-                         ; term <- termParser
-                         ; reservedParser "in"
-                         ; set <- setParser
-                         ; return (In term set)
-                         }
+relationParser =  try ( do {
+                           ; left <- termParser
+                           ; reservedParser "eq"
+                           ; right <- termParser
+                           ; return (Equal left right)
+                           } )
+              <|> try ( do {
+                           ; left <- termParser
+                           ; reservedParser "ne"
+                           ; right <- termParser
+                           ; return (NEqual left right)
+                           } )
+              <|> try ( do {
+                           ; term <- termParser
+                           ; reservedParser "in"
+                           ; set <- compParser
+                           ; return (In term set)
+                           } )
               <?> "relation"
 
 atomBool :: NameSpace m => Parser m PBool
@@ -256,18 +253,18 @@ tableBool = [ [Prefix (reservedParser "no"  >> return pNot)]
 
 -- | Parser of program expressions
 exprParser :: NameSpace m => Parser m PExpr
-exprParser =   (Aggr <$> aggrParser)
-           <|> (Bool <$> boolParser)
-           <?> "expr"
+exprParser =  try (Aggr <$> aggrParser)
+          <|> try (Bool <$> boolParser)
+          <?> "expr"
 
 -- | Parser of where-statement
-whereParser :: NameSpace m => Parser m PTerm
+whereParser :: NameSpace m => Parser m PBool
 whereParser =
   do { reservedParser "where"
      ; ts <- many1 (try (boolParser <* notFollowedBy (opStart coralDef)) <?> "where")
      ; return (foldr1 pAnd ts)
      }
-  <|> return (B True)
+  <|> return (Const True)
 
 -- | Parser of do-statement
 doParser :: NameSpace m => Parser m Program
@@ -282,47 +279,47 @@ nameParser = identifierParser >>= \name -> getLSymbol name >>= \case
 programParser :: NameSpace m => Parser m Program
 programParser = (reservedParser "done" >> return Program.Empty)
 
-         <|> do { n <- nameParser
-                ; vs <- many varParser
-                ; reservedOpParser "="
-                ; p <- programParser
-                ; return (Header n vs p)
-                }
+         <|> try ( do { n <- nameParser
+                      ; vs <- many varParser
+                      ; reservedOpParser "="
+                      ; p <- programParser
+                      ; return (Header n vs p)
+                      } )
 
 
          -- Parse an assigning instruction
-         <|> do { p <- aggrParser
-                ; g <- (reservedOpParser "=" >> toList <$> aggrParser)
-                       <|> (reservedOpParser "<-" >> aggrParser)
-                ; c <- whereParser
-                ; j <- programParser
-                ; return (Assign p g c j)
-                }
+         <|> try ( do { p <- aggrParser
+                      ; g <- (reservedOpParser "=" >> toList <$> aggrParser)
+                             <|> (reservedOpParser "<-" >> aggrParser)
+                      ; c <- whereParser
+                      ; j <- programParser
+                      ; return (Assign p g c j)
+                      } )
 
          -- Parse an branching instruction
-         <|> do { reservedParser "if"
-                ; c <- boolParser
-                ; b <- doParser
-                ; j <- programParser
-                ; return (Branch c b j)
-                }
+         <|> try ( do { reservedParser "if"
+                      ; c <- boolParser
+                      ; b <- doParser
+                      ; j <- programParser
+                      ; return (Branch c b j)
+                      } )
 
          -- Parse an switching instruction
-         <|> do { reservedParser "case"
-                ; e <- aggrParser
-                ; reservedParser "of"
-                ; c <- whereParser
-                ; cs <- many1 $ liftM2 (,) aggrParser doParser
-                ; j <- programParser
-                ; return (Switch e c cs j)
-                }
+         <|> try ( do { reservedParser "case"
+                      ; e <- aggrParser
+                      ; reservedParser "of"
+                      ; c <- whereParser
+                      ; cs <- many1 $ liftM2 (,) aggrParser doParser
+                      ; j <- programParser
+                      ; return (Switch e c cs j)
+                      } )
 
          -- Parse an acting instruction
-         <|> do { t <- aggrParser
-                ; c <- whereParser
-                ; j <- programParser
-                ; return (Action t c j)
-                }
+         <|> try ( do { t <- aggrParser
+                      ; c <- whereParser
+                      ; j <- programParser
+                      ; return (Action t c j)
+                      } )
 
          <?> "Program"
 
@@ -330,7 +327,7 @@ programParser = (reservedParser "done" >> return Program.Empty)
 -- Composing functions
 
 -- | Convert a program term to list of terms
-toList :: PTerm -> PTerm
+toList :: PAggr -> PAggr
 toList x = Comp (List [x])
 
 -- | Negate a given program term

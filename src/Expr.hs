@@ -40,6 +40,6 @@ data Composite a b
 
 data Expr a b c
   = NONE
-  | Aggr a b
+  | Aggr (Aggregate a b)
   | Bool c
   deriving (Eq)

@@ -8,7 +8,6 @@ case arg of
       forall [boundVariables vars, premises prems, conclusion [concl]]
       do
         h [x, y] = concl where h in [equality, equivalence] -- comment 2
-          x eq y -- comment 3
         x_header [x_body] <- x
         done
     done

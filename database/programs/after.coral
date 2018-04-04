@@ -4,10 +4,7 @@ case arg of
     case thrm of
       forall [boundVariables vars, premises prems, conclusion [concl]]
       do
-        h [x, y] = concl
-          where
-            h in [equality, equivalence]
-            x eq y
+        h [x, y] = concl where h in [equality, equivalence]
         x_header [x_body] <- x
         done
     done
