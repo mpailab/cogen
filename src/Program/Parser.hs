@@ -37,7 +37,6 @@ import           Text.Parsec.Token
 -- Internal imports
 import           LSymbol
 import           Program
-import           Term
 import           Utils
 
 ------------------------------------------------------------------------------------------
@@ -92,8 +91,10 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-"]
-  , reservedNames  = ["do", "done", "if", "case", "of", "where"] ++ Program.symbols
+  , reservedOpNames= ["=", "<-", "@", "&"]
+  , reservedNames  = ["do", "done", "if", "case", "of", "where",
+                      "True", "False", "no", "and", "or", "eq", "ne", "in",
+                      "args", "replace"]
   , caseSensitive  = True
   }
 
@@ -105,6 +106,11 @@ coralLexer = makeTokenParser coralDef
 -- returning the value of @p@.
 parensParser :: NameSpace m => Parser m a -> Parser m a
 parensParser = parens coralLexer
+
+-- | Lexeme parser @bracesParser p@ parses @p@ enclosed in braces (\'{\'
+-- and \'}\'), returning the value of @p@.
+bracesParser :: NameSpace m => Parser m a -> Parser m a
+bracesParser = braces coralLexer
 
 -- | Lexeme parser @bracketsParser p@ parses @p@ enclosed in brackets (\'[\'
 -- and \']\'), returning the value of @p@.
@@ -149,76 +155,153 @@ whiteSpaceParser :: NameSpace m => Parser m ()
 whiteSpaceParser = whiteSpace coralLexer
 
 -- | Parser of integers
-intParser :: NameSpace m => Parser m PSymbol
-intParser = (I . fromInteger) <$> naturalParser
-
--- | Parser of boolean values
-boolParser :: NameSpace m => Parser m PSymbol
-boolParser =  (reservedParser "True"  >> return (B True))
-      <|> (reservedParser "False" >> return (B False))
+intParser :: NameSpace m => Parser m Int
+intParser = fromInteger <$> naturalParser
 
 -- | Parser of symbols (logical symbols or variables)
 symbolParser :: NameSpace m => Parser m PSymbol
 symbolParser = identifierParser >>= \name -> getLSymbol name >>= \case
-    Just s  -> return (S s)
-    Nothing -> getPVar name
+  Just s  -> return (PSymbol.Sym s)
+  Nothing -> getPVar name
 
--- | Parser of atomic program terms
-atomParser :: NameSpace m => Parser m PTerm
-atomParser =  T <$> intParser
-          <|> T <$> boolParser
-          <|> T <$> symbolParser
-          <|> pTuple <$> parensParser (commaSepParser termParser)
-          <|> pList  <$> bracketsParser (commaSepParser termParser)
-          <?> "atomic PTerm"
+-- | Parser of program variables
+varParser :: NameSpace m => Parser m PSymbol
+varParser = identifierParser >>= \name -> getLSymbol name >>= \case
+  Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
+  Nothing -> getPVar name
 
--- | Parser of program terms
+entryParser :: NameSpace m => Parser m PEntry
+entryParser =  try do { PSymbol.Var x <- varParser
+                      ; reservedOpParser "&"
+                      ; y <- aggrParser
+                      ; return (Ptr x y)
+                      }
+           <|> try do { PSymbol.Var x <- varParser
+                      ; reservedOpParser "@"
+                      ; y <- aggrParser
+                      ; return (Ref x y)
+                      }
+           <?> "entry"
+
+aggrParser :: NameSpace m => Parser m PAggr
+aggrParser =  (Comp <$> compParser)
+          <|> (Int  <$> intParser)
+          <|> (Ent  <$> entryParser)
+          <|> (Sym  <$> symbolParser)
+          <?> "aggregate"
+
 termParser :: NameSpace m => Parser m PTerm
-termParser =  try (liftM2 pTerm symbolParser atomParser)
-          <|> buildExpressionParser table atomParser
-          <?> "PTerm"
+termParser =  try do { sym <- symbolParser
+                     ; terms <- bracketsParser (commaSepParser termParser))
+                     ; return (sym :> terms)
+                     }
+          <|> try do { sym <- symbolParser
+                     ; var <- varParser
+                     ; return (sym :>> var)
+                     }
+          <|> try do { sym <- symbolParser
+                     ; return (T sym)
+                     }
+          <?> "term"
 
--- Table for parsing of composite program terms
-table :: NameSpace m => [[Operator Text.Text () m PTerm]]
-table = [ [Prefix (reservedParser "no" >> return pNot)]
-        , [Prefix (reservedParser "args" >> return pArgs)]
-        , [Prefix (reservedParser "replace" >> return pReplace)]
-        , [Infix  (reservedParser "and" >> return pAnd) AssocRight]
-        , [Infix  (reservedParser "or" >> return pOr) AssocRight]
-        , [Infix  (reservedParser "eq" >> return pEq) AssocNone]
-        , [Infix  (reservedParser "ne" >> return pNeq) AssocNone]
-        , [Infix  (reservedParser "in" >> return pIn) AssocNone]
-        ]
+compParser :: NameSpace m => Parser m PComp
+compParser =  (List  <$> bracketsParser (commaSepParser aggrParser))
+          <|> (Tuple <$> parensParser   (commaSepParser aggrParser))
+          <|> (Set   <$> bracesParser   (commaSepParser aggrParser))
+          <|> (Term  <$> termParser)
+          <?> "composite"
+
+setParser :: NameSpace m => Parser m PSet
+setParser =  (Set <$> bracketsParser (commaSepParser termParser))
+         <|> (varParser >>= \(PSymbol.Var x) -> return (PSet.Var x))
+         <?> "set"
+
+relationParser :: NameSpace m => Parser m PBool
+relationParser =  try do {
+                         ; left <- termParser
+                         ; reservedParser "eq"
+                         ; right <- termParser
+                         ; return (Equal left right)
+                         }
+              <|> try do {
+                         ; left <- termParser
+                         ; reservedParser "ne"
+                         ; right <- termParser
+                         ; return (NEqual left right)
+                         }
+              <|> try do {
+                         ; term <- termParser
+                         ; reservedParser "in"
+                         ; set <- setParser
+                         ; return (In term set)
+                         }
+              <?> "relation"
+
+atomBool :: NameSpace m => Parser m PBool
+atomBool =  try (parensParser boolParser)
+        <|> try (reservedParser "True"  >> return (Const True ))
+        <|> try (reservedParser "False" >> return (Const False))
+        <|> try relationParser
+        <?> "atomic bool"
+
+boolParser :: NameSpace m => Parser m PBool
+boolParser = buildExpressionParser tableBool atomBool
+          <?> "bool"
+
+tableBool :: NameSpace m => [[Operator Text.Text () m PBool]]
+tableBool = [ [Prefix (reservedParser "no"  >> return pNot)]
+            , [Infix  (reservedParser "and" >> return pAnd) AssocRight]
+            , [Infix  (reservedParser "or"  >> return pOr)  AssocRight]
+            ]
+
+-- | Parser of program expressions
+exprParser :: NameSpace m => Parser m PExpr
+exprParser =   (Aggr <$> aggrParser)
+           <|> (Bool <$> boolParser)
+           <?> "expr"
 
 -- | Parser of where-statement
 whereParser :: NameSpace m => Parser m PTerm
 whereParser =
   do { reservedParser "where"
-     ; ts <- many1 (try (termParser <* notFollowedBy (opStart coralDef)) <?> "where")
+     ; ts <- many1 (try (boolParser <* notFollowedBy (opStart coralDef)) <?> "where")
      ; return (foldr1 pAnd ts)
      }
-  <|> return (T (B True))
+  <|> return (B True)
 
 -- | Parser of do-statement
 doParser :: NameSpace m => Parser m Program
 doParser = reservedParser "do" >> programParser
 
+nameParser:: NameSpace m => Parser m String
+nameParser = identifierParser >>= \name -> getLSymbol name >>= \case
+  Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
+  Nothing -> return name
+
 -- | Parser of programs
 programParser :: NameSpace m => Parser m Program
 programParser = (reservedParser "done" >> return Program.Empty)
 
+         <|> do { n <- nameParser
+                ; vs <- many varParser
+                ; reservedOpParser "="
+                ; p <- programParser
+                ; return (Header n vs p)
+                }
+
+
          -- Parse an assigning instruction
-         <|> do { t <- termParser
-                ; p <- (reservedOpParser "=" >> toList <$> termParser)
-                       <|> (reservedOpParser "<-" >> termParser)
+         <|> do { p <- aggrParser
+                ; g <- (reservedOpParser "=" >> toList <$> aggrParser)
+                       <|> (reservedOpParser "<-" >> aggrParser)
                 ; c <- whereParser
                 ; j <- programParser
-                ; return (Assign t p c j)
+                ; return (Assign p g c j)
                 }
 
          -- Parse an branching instruction
          <|> do { reservedParser "if"
-                ; c <- termParser
+                ; c <- boolParser
                 ; b <- doParser
                 ; j <- programParser
                 ; return (Branch c b j)
@@ -226,16 +309,16 @@ programParser = (reservedParser "done" >> return Program.Empty)
 
          -- Parse an switching instruction
          <|> do { reservedParser "case"
-                ; e <- termParser
+                ; e <- aggrParser
                 ; reservedParser "of"
                 ; c <- whereParser
-                ; cs <- many1 $ liftM2 (,) termParser doParser
+                ; cs <- many1 $ liftM2 (,) aggrParser doParser
                 ; j <- programParser
                 ; return (Switch e c cs j)
                 }
 
          -- Parse an acting instruction
-         <|> do { t <- termParser
+         <|> do { t <- aggrParser
                 ; c <- whereParser
                 ; j <- programParser
                 ; return (Action t c j)
@@ -246,72 +329,39 @@ programParser = (reservedParser "done" >> return Program.Empty)
 ------------------------------------------------------------------------------------------
 -- Composing functions
 
--- | Compose a program term @s t@ by symbol @s@ and term @t@
-pTerm :: PSymbol -> PTerm -> PTerm
-pTerm s (List :> ts) = s :> ts
-pTerm s t            = s :>> t
-
--- | Compose a program term for tuple of terms (tuple is defined as list of terms)
-pTuple :: [PTerm] -> PTerm
-pTuple [t] = t
-pTuple ts  = List :> ts
-
--- | Compose a program term for list of terms
-pList :: [PTerm] -> PTerm
-pList ts = List :> ts
-
 -- | Convert a program term to list of terms
 toList :: PTerm -> PTerm
-toList t = List :> [t]
+toList x = Comp (List [x])
 
 -- | Negate a given program term
-pNot :: PTerm -> PTerm
-pNot (Not    :> [t]) = t
-pNot (Equal  :> ts)  = NEqual :> ts
-pNot (NEqual :> ts)  = Equal :> ts
-pNot t               = Not :> [t]
+pNot :: PBool -> PBool
+pNot (Const x)    = Const (not x)
+pNot (Not x)      = x
+pNot (Equal x y)  = NEqual x y
+pNot (NEqual x y) = Equal x y
+pNot x            = Not x
 
 -- | Take the logical and of given program terms
-pAnd :: PTerm -> PTerm -> PTerm
-pAnd (T (B True)) y          = y
-pAnd x (T (B True))          = x
-pAnd x@(T (B False)) y       = x
-pAnd x y@(T (B False))       = y
-pAnd (And :> xs) (And :> ys) = And :> (xs ++ ys)
-pAnd x (And :> ys)           = And :> (x : ys)
-pAnd (And :> xs) y           = And :> (xs ++ [y])
-pAnd x y                     = And :> [x,y]
+pAnd :: PBool -> PBool -> PBool
+pAnd (Const True) y    = y
+pAnd x (Const True)    = x
+pAnd x@(Const False) y = x
+pAnd x y@(Const False) = y
+pAnd (And xs) (And ys) = And (xs ++ ys)
+pAnd x (And ys)        = And (x : ys)
+pAnd (And xs) y        = And (xs ++ [y])
+pAnd x y               = And [x,y]
 
 -- | Take the logical or of given program terms
-pOr :: PTerm -> PTerm -> PTerm
-pOr x@(T (B True)) y      = x
-pOr x y@(T (B True))      = y
-pOr (T (B False)) y       = y
-pOr x (T (B False))       = x
-pOr (Or :> xs) (Or :> ys) = Or :> (xs ++ ys)
-pOr x (Or :> ys)          = Or :> (x : ys)
-pOr (Or :> xs) y          = Or :> (xs ++ [y])
-pOr x y                   = Or :> [x,y]
-
--- | Return a program term which is the equality of a given program terms
-pEq :: PTerm -> PTerm -> PTerm
-pEq x y = Equal :> [x,y]
-
--- | Return a program term which is the negation of equality of a given program terms
-pNeq :: PTerm -> PTerm -> PTerm
-pNeq x y = NEqual :> [x,y]
-
--- | Return a program term which is including for elements of set
-pIn :: PTerm -> PTerm -> PTerm
-pIn x y = In :> [x,y]
-
--- | Return a program term which is the list of arguments of a given program term
-pArgs :: PTerm -> PTerm
-pArgs t = Args :> [t]
-
--- | Return a program term that represents replacing of program terms
-pReplace :: PTerm -> PTerm
-pReplace t = Replace :> [t]
+pOr :: PBool -> PBool -> PBool
+pOr x@(Const True) y = x
+pOr x y@(Const True) = y
+pOr (Const False) y  = y
+pOr x (Const False)  = x
+pOr (Or xs) (Or ys)  = Or (xs ++ ys)
+pOr x (Or ys)        = Or (x : ys)
+pOr (Or xs) y        = Or (xs ++ [y])
+pOr x y              = Or [x,y]
 
 ------------------------------------------------------------------------------------------
 -- Auxiliary functions

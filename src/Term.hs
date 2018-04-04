@@ -17,7 +17,7 @@ module Term
     (
       -- exports
       Term(..),
-      header, args, subterms,
+      header, args, subterms, change
       -- drawTerm,
       -- getVarNum,
       -- isContainLSymbol
@@ -31,7 +31,7 @@ import           Data.Char
 
 data Term a = T a
             | a :> [Term a]
-            | a :>> Term a
+            | a :>> a
             deriving (Eq, Ord)
 
 instance Foldable Term where
@@ -114,6 +114,7 @@ class ITerm t a where
   header   :: t a -> a         -- ^ returns term header
   args     :: t a -> [Term a]  -- ^ enumerate arguments of current term
   subterms :: t a -> [Term a]  -- ^ enumerates subterms of current term
+  change   :: t a -> Int -> t a -> t a
 
 instance ITerm Term a where
 
@@ -125,6 +126,12 @@ instance ITerm Term a where
 
   -- Get subterms list of term
   subterms t =  t : concatMap subterms (args t)
+
+  change (s :> ts) i t = s :> f ts i t
+    where
+      f (x:xs) n newVal
+        | n == 0 = newVal : xs
+        | otherwise = x : f xs (n-1) newVal
 
 -- class VarNum a where
 --   getVarNum :: a -> Int

@@ -30,7 +30,6 @@ module Program
       getPVars,
       initPrograms,
       initPVars,
-      isAction,
       namePVar,
       newPrograms,
       newPVars,
@@ -40,11 +39,9 @@ module Program
       Program.Vars,
       Programs,
       PVars,
-      PSymbol(..),
-      PTerm,
+      PTerm(..),
       setPrograms,
-      setPVars,
-      symbols
+      setPVars
     )
 where
 
@@ -59,63 +56,64 @@ import           Text.Regex.Posix
 
 -- Internal imports
 import           LSymbol
-import           Term
 import           Utils
+import Expr
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
--- | Type of program symbols
-data PSymbol = X Int                    -- ^ program variable
-             | I Int                    -- ^ integer constant
-             | B Bool                   -- ^ boolean constant
-             | S LSymbol                -- ^ user-defined logical symbol
-             | List                     -- ^ list of terms
-             | Tuple                    -- ^ tuple of terms
-             | Not                      -- ^ logical negation
-             | And                      -- ^ logical and
-             | Or                       -- ^ logical or
-             | Equal                    -- ^ equality of objects
-             | NEqual                   -- ^ negation of equality of objects
-             | In                       -- ^ including for elements of set
-             | Args                     -- ^ arguments of term
-             | Replace                  -- !
-             deriving (Eq, Ord)
+data PSymbol
+  = Var Int
+  | Sym LSymbol
+  deriving (Eq)
 
--- | Show instance for program symbols
-instance Show PSymbol where
-  show (X i)     = 't' : show i
-  show (I i)     = show i
-  show (B True)  = "True"
-  show (B False) = "False"
-  show Not       = "no"
-  show And       = "and"
-  show Or        = "or"
-  show Equal     = "eq"
-  show NEqual    = "ne"
-  show In        = "in"
-  show Args      = "args"
-  show Replace   = "replace"
+data PEntry
+  = Ptr Int PAggr
+  | Ref Int PAggr
+  | Inside PAggr
+  deriving (Eq)
 
-symbols :: [String]
-symbols = map show [B True, B False, Not, And, Or, Equal, NEqual, In, Args, Replace]
+type PTerm = Term PSymbol
 
-keywordsAction :: [PSymbol]
-keywordsAction = [Replace]
+data PSet
+  = Var Int
+  | Set [PAggr]
+  deriving (Eq)
+
+data PBool
+  = Const Bool
+  | Equal PTerm PTerm
+  | NEqual PTerm PTerm
+  | In PTerm PSet
+  | Not PBool
+  | And [PBool]
+  | Or [PBool]
+  deriving (Eq)
+
+type PAggr = Aggregate PSymbol Entry
+
+type PComp = Composite PSymbol Entry
 
 -- | Type of program terms
-type PTerm = Term PSymbol
+type PExpr = Expr PSymbol PEntry PBool
 
 -- | Type of program
 data Program
 
+  = Header
+    {
+      name      :: String,
+      arguments :: [PSymbol],
+      program   :: Program
+    }
+
   -- | Assigning instruction iterates terms with respect to a given condition
   --   and assigns them to a given program variable
-  = Assign
+  | Assign
     {
-      pattern_  :: PTerm,  -- ^ assigned pattern
-      generate  :: PTerm,  -- ^ generator of list of terms
-      condition :: PTerm,  -- ^ condition for iterating of terms
+      pattern_  :: PAggr,  -- ^ assigned pattern
+      generate  :: PAggr,  -- ^ generator of list of terms
+      condition :: PBool,  -- ^ condition for iterating of terms
       jump      :: Program -- ^ jump to next program fragment
     }
 
@@ -123,7 +121,7 @@ data Program
   --   with respect to a given condition
   | Branch
     {
-      condition :: PTerm,   -- ^ condition for the branch
+      condition :: PBool,   -- ^ condition for the branch
       branch    :: Program, -- ^ branch to program fragment
       jump      :: Program  -- ^ jump to next program fragment
     }
@@ -131,17 +129,17 @@ data Program
   -- | Switching instruction jumps to a program fragment defined by a given expression
   | Switch
     {
-      expression :: PTerm,              -- ^ expression
-      condition  :: PTerm,              -- ^ condition for switching
-      cases      :: [(PTerm, Program)], -- ^ list of pairs (pattern, program fragment)
+      expression :: PAggr,              -- ^ expression
+      condition  :: PBool,              -- ^ condition for switching
+      cases      :: [(PAggr, Program)], -- ^ list of pairs (pattern, program fragment)
       jump       :: Program             -- ^ jump to next program fragment
     }
 
   -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
-      action    :: PTerm,  -- ^ action
-      condition :: PTerm,  -- ^ condition of action
+      action    :: PAggr,  -- ^ action
+      condition :: PBool,  -- ^ condition of action
       jump      :: Program -- ^ jump to next program fragment
     }
 
@@ -215,19 +213,15 @@ class Monad m => Vars m where
   -- | Get a program variable by its name
   getPVar :: String -> m PSymbol
   getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
-    Just n  -> return (X n)
+    Just n  -> return (PSymbol.Var n)
     Nothing -> let n = curNum db
                    new_db = PVars (listArray (1,n) (name : elems (names db)))
                                   (M.insert name n (numbers db))
                                   (n + 1)
-               in setPVars new_db >> return (X n)
+               in setPVars new_db >> return (PSymbol.Var n)
 
 -- | Class for namespace of logical symbols and program variables
 class (LSymbol.Base m, Program.Vars m) => NameSpace m
 
 ------------------------------------------------------------------------------------------
 -- Functions
-
--- | Does a program term correspond to an action
-isAction :: PTerm -> Bool
-isAction (x :> _) = x `elem` keywordsAction
