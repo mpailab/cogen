@@ -34,6 +34,7 @@ import           Text.Parsec.Language
 import           Text.Parsec.Prim
 import           Text.Parsec.Text       hiding (Parser)
 import           Text.Parsec.Token
+import           Debug.Trace
 
 -- Internal imports
 import           LSymbol
@@ -45,15 +46,54 @@ import           Utils
 
 data PState = PSt {
     inFrag :: Bool,
-    indents :: [Int]
+    indents :: [IndentSt]
   }
+type IndentSt = Either (Int,Int) Int
+
 initState :: PState
-initState = PSt{ inFrag=False, indents=[] }
-pushIndent st i = st {indents = i:is} where is = indents st
-popIndent st = st {indents = is} where _:is = indents st
+initState = PSt { inFrag=False, indents=[Left (0,0)] }
 
--- indented f p = s
+topIndent :: NameSpace m => Parser m IndentSt
+topIndent = head . indents <$> getState
 
+pushIndent :: NameSpace m => IndentSt -> Parser m ()
+pushIndent i = traceM ("pushIndent "++show i) >> modifyState (\st -> let is = indents st in st {indents = i:is})
+
+popIndent :: NameSpace m => Parser m IndentSt
+popIndent = traceM "popIndent" >> getState >>= (\st -> let i:is = indents st in putState st {indents = is} >> return i)
+
+updateIndent :: NameSpace m => IndentSt -> Parser m ()
+updateIndent i = traceM ("updateIndent "++show i) >> modifyState (\st -> let _:is = indents st in st {indents = i:is})
+
+getPos :: NameSpace m => Parser m (Int,Int)
+getPos = getPosition >>= \pos -> return (sourceLine pos, sourceColumn pos)
+
+beginIndent :: NameSpace m => Parser m ()
+beginIndent = whiteSpaceParser >> do
+  pos@(cr,cc) <- getPos
+  st <- getState
+  case head $ indents st of
+    Left (r,c) | cr == r   -> pushIndent (Left (r,c))
+               | cc > c    -> updateIndent (Right cc) >> pushIndent (Left pos)
+               | otherwise -> parserZero
+    Right c -> if cc == c then pushIndent (Left pos)
+               else parserZero
+
+endIndent :: NameSpace m => Parser m ()
+endIndent = popIndent >>= \case
+  Left (r,c) -> topIndent >>= \case
+    Left (r1,c1) -> when (r1>r) $ updateIndent (Right c1)
+    _            -> return ()
+  _          -> return ()
+
+indentBlock :: NameSpace m => Parser m x -> Parser m x
+indentBlock p = try (beginIndent *> p <* endIndent)
+
+-- | check if correct indentation
+indented :: NameSpace m => Parser m ()
+indented = whiteSpaceParser >> topIndent >>= \case
+  Left (r,c) -> getPos >>= \(rr,cc)-> unless (rr==r || cc > c) parserZero
+  Right c -> getPos >>= \(_,cc)-> unless (cc >= c) parserZero
 
 
 -- | Parser type
@@ -118,47 +158,40 @@ coralDef = emptyDef
 coralLexer :: NameSpace m => GenTokenParser Text.Text PState m
 coralLexer = makeTokenParser coralDef
 
-wsp = whiteSpace coralLexer
-
-atIndent :: NameSpace m => Int -> Parser m ()
-atIndent n = wsp >> try (getPosition >>= \pos ->
-    unless (sourceColumn pos == n) parserZero
-  )
-
 -- | Lexeme parser @parensParser p@ parses @p@ enclosed in parenthesis,
 -- returning the value of @p@.
 parensParser :: NameSpace m => Parser m a -> Parser m a
-parensParser = parens coralLexer
+parensParser p = indented >> parens coralLexer p
 
 -- | Lexeme parser @bracketsParser p@ parses @p@ enclosed in brackets (\'[\'
 -- and \']\'), returning the value of @p@.
 bracketsParser :: NameSpace m => Parser m a -> Parser m a
-bracketsParser = brackets coralLexer
+bracketsParser p = indented >> brackets coralLexer p
 
 -- | Lexeme parser @identifierParser@ parses a legal identifier of Coral language.
 -- Returns the identifier string. This parser will fail on identifiers that are reserved
 -- words. Legal identifier (start) characters and reserved words are
 -- defined in the 'coralDef'.
 identifierParser :: NameSpace m => Parser m String
-identifierParser = identifier coralLexer
+identifierParser = indented >> identifier coralLexer
 
 -- | Lexeme parser @naturalParser@ parses a natural number (a positive whole
 -- number). Returns the value of the number. The number is parsed according to the grammar
 -- rules in the Haskell report.
 naturalParser :: NameSpace m => Parser m Integer
-naturalParser = natural coralLexer
+naturalParser = indented >> natural coralLexer
 
 -- | The lexeme parser @reservedOpParser name@ parses symbol @name@ which is a reserved
 -- operator of Coral language. It also checks that the @name@ is not a prefix of a valid
 -- operator.
 reservedOpParser :: NameSpace m => String -> Parser m ()
-reservedOpParser = reservedOp coralLexer
+reservedOpParser s = indented >> reservedOp coralLexer s
 
 -- | The lexeme parser @reservedParser name@ parses symbol @name@ which is a reserved
 -- identifier of Coral language. It also checks that the @name@ is not a prefix of a
 -- valid identifier.
 reservedParser :: NameSpace m => String -> Parser m ()
-reservedParser = reserved coralLexer
+reservedParser s = indented >> reserved coralLexer s
 
 -- | Lexeme parser @commaSepParser p@ parses /zero/ or more occurrences of @p@ separated
 -- by comma. Returns a list of values returned by @p@.
@@ -195,12 +228,12 @@ varParser = identifierParser >>= \name -> getLSymbol name >>= \case
 
 -- | Parser of variable references in program fragments
 varRefParser :: NameSpace m => Parser m PTerm
-varRefParser = getState >>= \case
-  True ->
+varRefParser = getState >>= \st ->
+  if inFrag st then
     reservedOpParser "$" *> identifierParser >>= \name -> getPVarIfExist name >>= \case
     Just s  -> return s
     Nothing -> unexpected ("Variable " ++ name ++ " not in scope.")
-  False -> unexpected "Variable reference outside of program fragment."
+  else unexpected "Variable reference outside of program fragment."
 
 -- | Parser of tuples of program terms
 tupleParser :: NameSpace m => Parser m PTerm
@@ -243,9 +276,9 @@ atomParser =  intParser
 
 -- | Parser of program terms
 termParser :: NameSpace m => Parser m PTerm
-termParser =  try (liftM2 Term symbolParser atomParser)
+termParser =  {-getPos >>= \pos -> traceM ("parse term "++show pos) >>-} (try (liftM2 Term symbolParser atomParser)
           <|> buildExpressionParser table atomParser
-          <?> "PTerm"
+          <?> "PTerm")
 
 -- Table for parsing of composite program terms
 table :: NameSpace m => [[Operator Text.Text PState m PTerm]]
@@ -261,22 +294,25 @@ table = [ [Prefix (reservedParser "no" >> return pNot)]
 
 -- | Parser of where-statement
 whereParser :: NameSpace m => Parser m PTerm
-whereParser =
-  do { reservedParser "where"
-     ; ts <- many1 (try (termParser <* notFollowedBy (opStart coralDef)) <?> "where")
+whereParser = getPos >>= \pos -> traceM ("parse where "++show pos) >> (
+  do { getPos >>= \pos -> traceM ("before reservedParser where "++show pos)
+     ; reservedParser "where"
+     ; getPos >>= \pos -> traceM ("after reservedParser where "++show pos)
+     ; ts <- many1 (indentBlock (termParser <* notFollowedBy (opStart coralDef)) <?> "where")
+     ; getPos >>= \p -> traceM ("where finished "++show p)
      ; return (foldr1 pAnd ts)
      }
-  <|> return (B True)
+  <|> (getPos >>= \pos -> traceM ("no where "++show pos) >> return (B True)))
 
 -- | Parser of do-statement
 doParser :: NameSpace m => Parser m Program
-doParser = reservedParser "do" >> programParser
+doParser = getPos >>= \pos -> traceM ("parse do "++show pos) >> reservedParser "do" >> programParser
 
 fragParser :: NameSpace m => Parser m PTerm
-fragParser = do
+fragParser = getPos >>= \pos -> traceM ("parse fragment "++show pos) >>  do
   string "{"
   st <- getState
-  putState True
+  putState st{ inFrag=True }
   res <- many stmtParser
   string "}"
   putState st
@@ -284,7 +320,7 @@ fragParser = do
 
 -- | Parser of statements
 stmtParser :: NameSpace m => Parser m ProgStmt
-stmtParser =
+stmtParser = getPos >>= \pos -> traceM ("parse statement "++show pos) >> indentBlock (
          -- Parse an assigning instruction
              do { p <- termParser
                 ; (tp,g) <- (,) PMSelect <$> ((reservedOpParser "=" >> toList <$> termParser)
@@ -315,7 +351,7 @@ stmtParser =
          <|> do { t <- termParser
                 ; c <- whereParser
                 ; return (Action t c)
-                }
+                })
          <?> "Statement"
 
 -- | Parser of programs
