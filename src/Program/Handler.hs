@@ -416,14 +416,15 @@ runStmt (Assign PMSelect p g c) runj = case g of
 runStmt (Assign PMAppend p g c) runj = case p of
   X i -> do
     BE cc <- eval c
-    guard cc
-    var <- getAssignment i
-    gg <- eval g
-    newvar <- case (var <|. PFE [], gg) of
-          (PFE x, LE y) -> PFE . (x ++ ) <$> sequence (replaceVRefSt /@ mconcat (map prog y)) -- if not defined, assign right part
-          _ -> error "Evaluating error: invalid operands for '<<' operator\n"
-    setAssignment i newvar
-    runj
+    let a = do {
+        var <- getAssignment i
+      ; gg <- eval g
+      ; newvar <- case (var <|. PFE [], gg) of
+              (PFE x, LE y) -> PFE . (x ++ ) <$> sequence (replaceVRefSt /@ mconcat (map prog y)) -- if not defined, assign right part
+              _ -> error "Evaluating error: invalid operands for '<<' operator\n"
+      ; setAssignment i newvar
+      ; runj
+      } in when cc a
   _ -> error "Evaluating error: left of '<<' must be a variable\n"
 
 runStmt (Branch c b) runj = do
