@@ -28,23 +28,28 @@ module Program
       getPrograms,
       getPVar,
       getPVars,
+      getPVarIfExist,
       initPrograms,
       initPVars,
       namePVar,
       newPrograms,
       newPVars,
       NameSpace,
+      Header(..),
+      PSymbol(..),
       Program(..),
+      ProgStmt(..),
       Program.Base,
       Program.Vars,
       Programs,
       PAggr,
+      PAtom(..),
       PBool(..),
       PComp(..),
       PEntry(..),
       PExpr,
-      PSymbol(..),
-      PTerm,
+      PMType(..),
+      PTerm(..),
       PVars,
       setPrograms,
       setPVars
@@ -63,22 +68,28 @@ import           Text.Regex.Posix
 -- Internal imports
 import           Expr
 import           LSymbol
-import           Term
 import           Utils
+import           Term
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
+data PAtom
+  = Func Int PAggr -- ^ function call
+  | Frag [ProgStmt] -- ^ program fragment
+  deriving (Eq, Ord)
+
 data PSymbol
   = X Int
   | S LSymbol
-  deriving (Eq)
+  | Atom PAtom
+  deriving (Eq, Ord)
 
 data PEntry
   = Ptr Int PAggr
   | Ref Int PAggr
   | Inside PAggr
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 type PTerm = Term PSymbol
 
@@ -90,7 +101,7 @@ data PBool
   | Not PBool
   | And [PBool]
   | Or [PBool]
-  deriving (Eq)
+  deriving (Eq, Ord)
 
 type PAggr = Aggregate PSymbol PEntry
 
@@ -99,33 +110,36 @@ type PComp = Composite PSymbol PEntry
 -- | Type of program terms
 type PExpr = Expr PSymbol PEntry PBool
 
--- | Type of program
-data Program
+-- | type of assignment statement
+data PMType = PMSelect -- ^ match patterns with list elements (l1,...,lN <- right)
+            | PMUnord  -- ^ match list pattern with list of elements in any order (left ~= right)
+            | PMAppend -- ^ appends right part to variable (left << right)
+            deriving (Eq, Ord)
 
-  = Header
-    {
-      name      :: String,
-      arguments :: [PSymbol],
-      program   :: Program
-    }
+data Header = Header
+  {
+    name      :: String,
+    arguments :: [PSymbol]
+  }
+  deriving (Eq, Ord)
 
+-- | Type of program statement
+data ProgStmt
   -- | Assigning instruction iterates terms with respect to a given condition
   --   and assigns them to a given program variable
-  | Assign
+  = Assign
     {
+      pmtype    :: PMType, -- ^ type of pattern matching in assignment
       pattern_  :: PAggr,  -- ^ assigned pattern
       generate  :: PAggr,  -- ^ generator of list of terms
-      condition :: PBool,  -- ^ condition for iterating of terms
-      jump      :: Program -- ^ jump to next program fragment
+      condition :: PBool   -- ^ condition for iterating of terms
     }
-
   -- | Branching instruction jumps to a given program fragment
   --   with respect to a given condition
   | Branch
     {
       condition :: PBool,   -- ^ condition for the branch
-      branch    :: Program, -- ^ branch to program fragment
-      jump      :: Program  -- ^ jump to next program fragment
+      branch    :: [ProgStmt]  -- ^ branch to program fragment
     }
 
   -- | Switching instruction jumps to a program fragment defined by a given expression
@@ -133,22 +147,25 @@ data Program
     {
       expression :: PAggr,              -- ^ expression
       condition  :: PBool,              -- ^ condition for switching
-      cases      :: [(PAggr, Program)], -- ^ list of pairs (pattern, program fragment)
-      jump       :: Program             -- ^ jump to next program fragment
+      cases      :: [(PAggr, [ProgStmt])]  -- ^ list of pairs (pattern, program fragment)
     }
 
   -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
       action    :: PAggr,  -- ^ action
-      condition :: PBool,  -- ^ condition of action
-      jump      :: Program -- ^ jump to next program fragment
+      condition :: PBool   -- ^ condition of action
     }
 
-  -- | Empty represents an auxiliary program instruction
-  | Empty
+  -- | program fragment variable with delayed substitution
+  | DelayedFrag PTerm
 
-  deriving(Eq)
+  deriving(Eq,Ord)
+
+-- | Type of program : header + command list
+data Program = Program Header [ProgStmt]
+  | Empty
+  deriving(Eq,Ord)
 
 -- | Type of programs database
 type Programs = M.Map LSymbol Program
@@ -211,6 +228,10 @@ class Monad m => Vars m where
     let m = curNum db
         x = if 0 < n && n < m then Just (names db ! (m - n)) else Nothing
     in return x
+
+  -- | Get a program variable by its name
+  getPVarIfExist :: String -> m (Maybe PSymbol)
+  getPVarIfExist name = getPVars >>= \db -> return $ X <$> M.lookup name (numbers db)
 
   -- | Get a program variable by its name
   getPVar :: String -> m PSymbol
