@@ -36,14 +36,13 @@ module Program
       newPVars,
       NameSpace,
       Header(..),
-      PSymbol(..),
+      PTerminal(..),
       Program(..),
       ProgStmt(..),
       Program.Base,
       Program.Vars,
       Programs,
       PAggr,
-      PAtom(..),
       PBool(..),
       PComp(..),
       PEntry(..),
@@ -74,15 +73,12 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-data PAtom
-  = Func Int PAggr -- ^ function call
-  | Frag [ProgStmt] -- ^ program fragment
-  deriving (Eq, Ord)
-
-data PSymbol
+data PTerminal
   = X Int
   | S LSymbol
-  | Atom PAtom
+  | E PEntry
+  | Func Int PAggr -- ^ function call
+  | Frag [ProgStmt] -- ^ program fragment
   deriving (Eq, Ord)
 
 data PEntry
@@ -91,7 +87,7 @@ data PEntry
   | Inside PAggr
   deriving (Eq, Ord)
 
-type PTerm = Term PSymbol
+type PTerm = Term PTerminal
 
 data PBool
   = Const Bool
@@ -103,12 +99,12 @@ data PBool
   | Or [PBool]
   deriving (Eq, Ord)
 
-type PAggr = Aggregate PSymbol PEntry
+type PAggr = Aggregate PTerminal PEntry
 
-type PComp = Composite PSymbol PEntry
+type PComp = Composite PTerminal PEntry
 
 -- | Type of program terms
-type PExpr = Expr PSymbol PEntry PBool
+type PExpr = Expr PTerminal PEntry PBool
 
 -- | type of assignment statement
 data PMType = PMSelect -- ^ match patterns with list elements (l1,...,lN <- right)
@@ -119,7 +115,7 @@ data PMType = PMSelect -- ^ match patterns with list elements (l1,...,lN <- righ
 data Header = Header
   {
     name      :: String,
-    arguments :: [PSymbol]
+    arguments :: [PTerminal]
   }
   deriving (Eq, Ord)
 
@@ -230,11 +226,11 @@ class Monad m => Vars m where
     in return x
 
   -- | Get a program variable by its name
-  getPVarIfExist :: String -> m (Maybe PSymbol)
+  getPVarIfExist :: String -> m (Maybe PTerminal)
   getPVarIfExist name = getPVars >>= \db -> return $ X <$> M.lookup name (numbers db)
 
   -- | Get a program variable by its name
-  getPVar :: String -> m PSymbol
+  getPVar :: String -> m PTerminal
   getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
     Just n  -> return (X n)
     Nothing -> let n = curNum db

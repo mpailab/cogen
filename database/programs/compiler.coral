@@ -30,15 +30,16 @@ do
             place = (premise in Filters ? { premises() } :
                      условие in Filters ? { условия() } : { premises() ++ условия()})
             Identification << {
-              ..ptr->$From.. <- $place -- ptr становтся указателем на подтерм,
+              ..ptr&$From.. <- $place -- ptr становтся указателем на подтерм,
                                        -- идентифицираванный с шаблоном From
             }
             Actions << {
-              replace ptr $To
+              ptr := $To
             }
             done
           (h [второйтерм], equivalence [conjunction* b, c])
-          (h [второйтерм], equivalence [c, conjunction* b]) where h in [заменаусловия, заменатермов]
+          (h [второйтерм], equivalence [c, conjunction* b])
+          where h in [заменаусловия, заменатермов]
           do
             list = case h of
               заменаусловия -> условия

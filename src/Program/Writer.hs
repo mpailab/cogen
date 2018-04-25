@@ -53,7 +53,7 @@ instance Write PBool where
 instance Write PTerm where
   write = writeTerm False
 
-instance Write PSymbol where
+instance Write PTerminal where
   write = writeSymbol
 
 ------------------------------------------------------------------------------------------
@@ -79,9 +79,10 @@ writeInfx :: NameSpace m => String -> [a] -> (a -> m String) -> m String
 writeInfx x y wr = intercalate (" " ++ x ++ " ") <$> mapM wr y
 
 -- | Write a program symbol
-writeSymbol :: NameSpace m => PSymbol -> m String
+writeSymbol :: NameSpace m => PTerminal -> m String
 writeSymbol (X n) = writeVar n
 writeSymbol (S s) = nameLSymbol s
+writeSymbol (E e) = writeEntry False e
 
 writeEntry :: NameSpace m => Bool -> PEntry -> m String
 writeEntry par (Ref n x)  = writeVar n +<>+ "@" +>+ writeAggr True x
@@ -142,7 +143,7 @@ writeWhereCond :: NameSpace m => Int -> PBool -> m String
 writeWhereCond ind (Const True) = return "\n"
 writeWhereCond ind (And conds) = "\n" +>+
   writeIndent ind +<>+
-  "  where\n" +>+ writeWhere (ind+1) conds
+  "  where\n" +>+ writeWhere (ind+2) conds
 
 writeWhereCond ind cond = " where " +>+ write cond  +<+ "\n"
 
@@ -157,7 +158,7 @@ writeStmt ind (Assign tp pat gen cond) =
 writeStmt ind (Branch cond br) =
   writeIndent ind +<>+ "if " +>+ write cond +<>+ "\n" +>+
   writeIndent ind +<>+ "do\n" +>+
-  writeProgTail (ind+1) br
+  writeProgTail ind br
 
 -- | Write a switching instruction of program fragment corresponding to a given indent
 writeStmt ind (Switch expr cond cs) =
@@ -170,8 +171,8 @@ writeStmt ind (Action act cond) =
   writeIndent ind +<>+ write act +<>+ writeWhereCond ind cond
 
 writeProgTail :: NameSpace m => Int -> [ProgStmt] -> m String
-writeProgTail ind (s:ss) = writeStmt (ind+1) s +<>+ writeProgTail (ind+1) ss
-writeProgTail ind [] = writeIndent ind +<+ "done\n"
+writeProgTail ind = foldr ((+<>+) . writeStmt (ind+1)) (writeIndent ind +<+ "done\n") -- +<>+ writeProgTail ind ss
+--writeProgTail ind [] = writeIndent ind +<+ "done\n"
 
 -- | Write a program fragment corresponding to a given indent
 writeProgram :: NameSpace m => Int -> Program -> m String
@@ -181,6 +182,6 @@ writeSwitchCases :: NameSpace m => Int -> [(PAggr, [ProgStmt])] -> m String
 writeSwitchCases ind ((pat,prog):cs) =
   writeIndent ind +<>+ write pat +<>+ "\n" +>+
   writeIndent ind +<>+ "do\n" +>+
-  writeProgTail (ind+1) prog +<>+
+  writeProgTail ind prog +<>+
   writeSwitchCases ind cs
 writeSwitchCases ind [] = return ""
