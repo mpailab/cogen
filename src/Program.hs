@@ -143,7 +143,7 @@ data ProgStmt
     {
       expression :: PAggr,              -- ^ expression
       condition  :: PBool,              -- ^ condition for switching
-      cases      :: [(PAggr, [ProgStmt])]  -- ^ list of pairs (pattern, program fragment)
+      cases      :: [(PAggr, PBool, [ProgStmt])]  -- ^ list of pairs (pattern, program fragment)
     }
 
   -- | Acting instruction performs a given action with respect to a given condition

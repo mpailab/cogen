@@ -80,9 +80,9 @@ beginIndent = whiteSpaceParser >> do
   case head $ indents st of
     Left (r,c) | cr == r   -> pushIndent (Left (r,c))
                | cc > c    -> updateIndent (Right cc) >> pushIndent (Left pos)
-               | otherwise -> parserZero
+               | otherwise -> dbg ("no indent, top = L"++show (r,c)) >> parserZero
     Right c -> if cc == c then pushIndent (Left pos)
-               else parserZero
+               else dbg ("no indent, top = R"++ show c) >>parserZero
 
 endIndent :: NameSpace m => Parser m ()
 endIndent = popIndent >>= \case
@@ -264,7 +264,7 @@ entryParser trm = dbg "parse entry" >> do { X n <- varParser
 
 aggrParser :: NameSpace m => Parser m PAggr
 aggrParser =  dbg "parse aggr" >> (
-              try (Comp <$> compParser << dbg "return Comp")
+              try (Comp <$> compParser <* dbg "return Comp")
           <|> try (Int  <$> intParser)
           <|> try (Entr <$> entryParser False)
           <|> try (Sym  <$> (symbolParser <|> fragParser))
@@ -275,7 +275,7 @@ termParser =  getPos >>= \pos -> traceM ("parse term "++show pos) >>
       (   parensParser termParser
       <|> (symbolParser >>= \sym ->
               (T . E) <$> tryEntry sym
-          <|> (sym :>) <$> (dbg "try brackets" >> bracketsParser (commaSepParser termParser))
+          <|> (sym :>) <$> (dbg "try brackets" >> bracketsParser (commaSepParser termParser <|> return []))
           <|> (sym :>>) <$> (dbg "try :>> var" >> indented >> varParser)
           <|> (dbg "return T sym" >> return (T sym))))
           <?> "term"
@@ -283,13 +283,11 @@ termParser =  getPos >>= \pos -> traceM ("parse term "++show pos) >>
             tryEntry (X n) = dbg "try entry" >> entryTailParser True n
             tryEntry _ = parserZero
 
-a << b = do {r <- a; b>>return r}
-
 compParser :: NameSpace m => Parser m PComp
 compParser =  dbg "parse comp" >> ((List  <$> bracketsParser (commaSepParser aggrParser))
           <|> (Tuple <$> parensParser   (commaSepParser aggrParser))
           <|> (Set   <$> bracesParser   (commaSepParser aggrParser))
-          <|> (Term  <$> (termParser << dbg "return Term"))
+          <|> (Term  <$> (termParser <* dbg "return Term"))
           <?> "composite")
 
 relationParser :: NameSpace m => Parser m PBool
@@ -352,9 +350,9 @@ whereParser ind = dbg "parse where" >> (
 
 -- | Parser of do-statement
 doParser :: NameSpace m => Parser m [ProgStmt]
-doParser = dbg "parse do"
-                  >> reservedParser "do"
-                  >>  many stmtParser <* (dbg "read done" >> reservedParserU "done" << dbg "done found") --programParser
+doParser = dbg "parse do" >> indentBlock (
+                     reservedParser "do"
+                  >> many stmtParser) <* reservedParserU "done"
 
 fragParser :: NameSpace m => Parser m PTerminal
 fragParser = getPos >>= \pos -> traceM ("parse fragment "++show pos) >>  do
@@ -371,6 +369,14 @@ nameParser = identifierParser >>= \name -> getLSymbol name >>= \case
   Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
   Nothing -> return name
 
+caseParser :: NameSpace m => Parser m [(PAggr, PBool, [ProgStmt])]
+caseParser = do
+  pts <- many1 . indentBlock $ liftM2 (,) aggrParser (option (Const True) (indentBlock $ whereParser False))
+  dbg "done cases, find do"
+  common <- whereParser True
+  doblock <- doParser
+  return $ map (\(a,c) -> (a, pAnd c common, doblock)) pts
+
 -- | Parser of statements
 stmtParser :: NameSpace m => Parser m ProgStmt
 stmtParser = (dbg "parse statement " >> (try . indentBlock) (
@@ -385,10 +391,13 @@ stmtParser = (dbg "parse statement " >> (try . indentBlock) (
 
          -- Parse an switching instruction
          <|> do { reservedParser "case"
+                ; dbg "case found"
                 ; e <- aggrParser
+                ; dbg "case expression read"
                 ; reservedParser "of"
                 ; c <- whereParser True
-                ; cs <- many1 $ liftM2 (,) aggrParser doParser
+                ; dbg "start read cases"
+                ; cs <- mconcat <$> many1 caseParser -- liftM2 (,) aggrParser doParser
                 ; return (Switch e c cs)
                 }
 
