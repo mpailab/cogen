@@ -6,7 +6,7 @@ f arg thrm =
         Comment 1
       -}
       case thrm of
-        forall [boundVariables vars, premises prems, conclusion [concl]]
+        forall [boundVariables vars, premises prems, conclusion [concl]] where vars eq thrm
         do
           h [x, y] = concl where h in [equality, equivalence] -- comment 2
             x eq y -- comment 3
