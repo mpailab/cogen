@@ -338,12 +338,12 @@ exprParser =  dbg "parse expr" >> (
 -- | Parser of where-statement
 whereParser :: NameSpace m => Bool -> Parser m PBool
 whereParser ind = dbg "parse where" >> (
-  do { getPos >>= \pos -> traceM ("before reservedParser where "++show pos)
+  do { dbg "before reservedParser where"
      ; when ind indented
      ; reservedParser "where"
-     ; getPos >>= \pos -> traceM ("after reservedParser where "++show pos)
-     ; ts <- many1 (indentBlock (boolParser <* notFollowedBy (opStart coralDef)) <?> "where")
-     ; getPos >>= \p -> traceM ("where finished "++show p)
+     ; dbg "after reservedParser where"
+     ; ts <- many1 (indentBlock (boolParser <?> "where condition"))
+     ; dbg "where finished"
      ; return (foldr1 pAnd ts)
      }
   <|> return (Const True))
@@ -355,7 +355,7 @@ doParser = dbg "parse do" >> indentBlock (
                   >> many stmtParser) <* reservedParserU "done"
 
 fragParser :: NameSpace m => Parser m PTerminal
-fragParser = getPos >>= \pos -> traceM ("parse fragment "++show pos) >>  do
+fragParser = dbg "parse fragment" >>  do
   string "{"
   st <- getState
   putState st{ inFrag=True }

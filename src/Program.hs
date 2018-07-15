@@ -76,6 +76,7 @@ import           Term
 data PTerminal
   = X Int
   | S LSymbol
+  | AnySymbol
   | E PEntry
   | Func Int PAggr -- ^ function call
   | Frag [ProgStmt] -- ^ program fragment
