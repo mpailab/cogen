@@ -17,9 +17,11 @@ module Expr
 where
 
 -- External imports
+import qualified Data.Map as M
 
 -- Internal imports
 import           Term
+
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -31,9 +33,12 @@ data Aggregate a b
   | Comp (Composite a b)
   deriving (Eq, Ord)
 
+type HTable a b = M.Map a [Aggregate a b]
+
 data Composite a b
   = List [Aggregate a b]
   | Tuple [Aggregate a b]
+  | Table (HTable a b)
   | Set [Aggregate a b]
   | Term (Term a)
   deriving (Eq, Ord)
