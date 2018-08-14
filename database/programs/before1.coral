@@ -1,107 +1,109 @@
-case arg of
-  theorem [t1]
-  do
-    if Compiler
-    do -- Parse the theorem of inference rule
-      case (Header,t1) of
-        (_, forall [boundVariables t2, premises t3, conclusion [concl]])
-        do
-          Bounds = t2
-          Premises = t3
-          case (Header, concl) of
-            (h [второйтерм], equivalence [conjunction* b, c])
-            (h [второйтерм], equivalence [c, conjunction* b]) where h in [заменаусловия, заменатермов]
-            do
-              list = case h of
-                заменаусловия -> условия
-                заменатермов -> premises
-              Identification << {
-                describe = type
-                $b ++other ~= $list
-              }
-              Actions << {
-                $list := $c:other
-              }
-              done
-            (связка, equivalence [exists [boundVariables y, conjunction* b], c])
-            do
-              Identification << { -- добавляем операторы в идентификационную часть приёма
-                params z <- goals
-                $b ++ other ~= premises where -- унификация множества термов, названия переменных, как в теореме
-                  $y `subset` z   -- все переменные из списка y идентифицировались с параметрами задачи
-                  freeVariables(other) `intersect` $y = [] -- переменных из списка y нет среди оставшихся посылок
-                  @PremiseMatchConditions -- дополнительные условия, которые могут быть добавлены потом
-                                          -- путём определения переменной PremiseMatchConditions
-              }
-              Actions << { -- добавляем операторы в действия при применении приёма
-                replace (params z) (params (z `setminus` $y)) in goals
-                premises := $с:other
-              }
-            done
-            (вывод, _) -- 10.2.2 пункт 1
-            do
-               -- Идентифицирующая часть полностью определяется указателями: какую посылку как идентифицировать
-              Actions << {
-                premises := concl:premises() -- premices() в правой части означает, что это вызов функции, а не логический символ
-              }
-              done
-            (выводусловия, _) -- 10.2.2 пункт 2
-            do
-              Actions << {
-                условия := concl:условия
-              }
-              done
-            (подборзначений, _) -- 10.2.3 пункт 1
-            do
-              result = [t3!i | подборзначений [i] <- Specifiers]
-              Identification << {
-                $concl:other ~= условия
-              }
-              Actions << {
-                условия := $result ++ other
-              }
-            done
-            (параметризация, h [b, exists [boundVariables y, conjunction* f]]) -- 10.2.3 пункт 2
-              where h in [equivalence, implies]
-            do
-              result = [t3!i | подборзначений [i] <- Specifiers]
-              if h=implies do Identification << { example in goals } done -- in вместо <- означает, что ищем только 1 экземпляр
-              Identification << { $b:other ~= условия }
-              Subproblem << {
-                $y = newvars -- y становится равно новым переменным, ещё не участвовавшим в задаче
-                subproblem = [описать, premises(), $f++other, (unknowns ($y++x)):gs] where (unknowns x):gs ~= goals
-              }
-              Actions << {
-                subans = solve(subproblem)
-                if subans != fail -- оператор "не равно" как в C++?
-                do
-                  answer simplify(exists [boundVariables $y, subans]) -- создаёт и решает задачу на упрощение в условиях текущей задачи
-                  -- оператор answer выдаёт ответ задачи
+f arg thrm =
+  case arg of
+    theorem [t1]
+    do
+      if Compiler
+      do -- Parse the theorem of inference rule
+        case (Header,t1) of
+          (_, forall [boundVariables t2, premises t3, conclusion [concl]])
+          do
+            Bounds = t2
+            Premises = t3
+            case (Header, concl) of
+              (h [left_to_right], equivalence [and b | b, c])
+              (h [left_to_right], equivalence [c, and b | b])
+                where h in [zamenausloviya, zamenatermov]
+              do
+                list = case h of
+                  zamenausloviya -> conditions
+                  zamenatermov -> premises
+                Identification << {<
+                  describe = type
+                  $b ++other ~= $list
+                >}
+                Actions << {<
+                  $list := $c:other
+                >}
                 done
-              }
-            done
-            (свёртка, forall [boundVariables y, premises b, conclusion c]) -- 10.2.3 пункт 3
-            do
-              Identification << {
-                доказать = type()
-                [$c] = условия where varpattern [$y] -- varpattern означает, что на место y можно подставлять только переменные
-                $b++other ~= premises() where
-                  varpattern [$y]
-                  freeVariables(other) 'intersect' [$y] = []
-                  @PremiseMatchConditions
-              }
-              Action { answer true } -- в случае срабатывания приёма сразу выдаётся ответ "истина"
-            done
+              (sviazka, equivalence [exists [boundVariables y, and b | b], c])
+              do
+                Identification << { -- добавляем операторы в идентификационную часть приёма
+                  params z <- goals
+                  $b ++ other ~= premises where -- унификация множества термов, названия переменных, как в теореме
+                    $y `subset` z   -- все переменные из списка y идентифицировались с параметрами задачи
+                    freeVariables(other) `intersect` $y = [] -- переменных из списка y нет среди оставшихся посылок
+                    @PremiseMatchConditions -- дополнительные условия, которые могут быть добавлены потом
+                                            -- путём определения переменной PremiseMatchConditions
+                }
+                Actions << { -- добавляем операторы в действия при применении приёма
+                  replace (params z) (params (z `setminus` $y)) in goals
+                  premises := $с:other
+                }
+              done
+              (вывод, _) -- 10.2.2 пункт 1
+              do
+                 -- Идентифицирующая часть полностью определяется указателями: какую посылку как идентифицировать
+                Actions << {
+                  premises := concl:premises() -- premices() в правой части означает, что это вызов функции, а не логический символ
+                }
+                done
+              (выводусловия, _) -- 10.2.2 пункт 2
+              do
+                Actions << {
+                  условия := concl:условия
+                }
+                done
+              (подборзначений, _) -- 10.2.3 пункт 1
+              do
+                result = [t3!i | подборзначений [i] <- Specifiers]
+                Identification << {
+                  $concl:other ~= условия
+                }
+                Actions << {
+                  условия := $result ++ other
+                }
+              done
+              (параметризация, h [b, exists [boundVariables y, conjunction* f]]) -- 10.2.3 пункт 2
+                where h in [equivalence, implies]
+              do
+                result = [t3!i | подборзначений [i] <- Specifiers]
+                if h=implies do Identification << { example in goals } done -- in вместо <- означает, что ищем только 1 экземпляр
+                Identification << { $b:other ~= условия }
+                Subproblem << {
+                  $y = newvars -- y становится равно новым переменным, ещё не участвовавшим в задаче
+                  subproblem = [описать, premises(), $f++other, (unknowns ($y++x)):gs] where (unknowns x):gs ~= goals
+                }
+                Actions << {
+                  subans = solve(subproblem)
+                  if subans != fail -- оператор "не равно" как в C++?
+                  do
+                    answer simplify(exists [boundVariables $y, subans]) -- создаёт и решает задачу на упрощение в условиях текущей задачи
+                    -- оператор answer выдаёт ответ задачи
+                  done
+                }
+              done
+              (свёртка, forall [boundVariables y, premises b, conclusion c]) -- 10.2.3 пункт 3
+              do
+                Identification << {
+                  доказать = type()
+                  [$c] = условия where varpattern [$y] -- varpattern означает, что на место y можно подставлять только переменные
+                  $b++other ~= premises() where
+                    varpattern [$y]
+                    freeVariables(other) 'intersect' [$y] = []
+                    @PremiseMatchConditions
+                }
+                Action { answer true } -- в случае срабатывания приёма сразу выдаётся ответ "истина"
+              done
+          done
         done
       done
-    done
 
-  plus [t1]
-  do
-    case t1 of
-      equality [plus [t2, t3], plus [neg [t2], t4]]
-      do
-        replace t (equality [t3, neg [t4]])
-        done
+    plus [t1]
+    do
+      case t1 of
+        equality [plus [t2, t3], plus [neg [t2], t4]]
+        do
+          replace t (equality [t3, neg [t4]])
+          done
+      done
     done
-  done

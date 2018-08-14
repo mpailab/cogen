@@ -29,7 +29,7 @@ Symbol {
 },
 Symbol {
   id                = 5,
-  name              = "right-to-left",
+  name              = "right_to_left",
   synonyms          = ["firstsubterm"],
   categories        = ["Rule.Header"],
   description       = "Theorem header for right-to-left replacing of terms"
@@ -37,7 +37,7 @@ Symbol {
 },
 Symbol {
   id                = 6,
-  name              = "left-to-right",
+  name              = "left_to_right",
   synonyms          = ["secondsubterm"],
   categories        = ["Rule.Header"],
   description       = "Theorem header for left-to-right replacing of terms"
@@ -80,6 +80,13 @@ Symbol {
 Symbol {
   id                = 12,
   name              = "equivalence",
+  synonyms          = [],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 13,
+  name              = "and",
   synonyms          = [],
   categories        = [],
   description       = ""

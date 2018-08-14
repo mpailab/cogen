@@ -132,12 +132,7 @@ writeWhere ind = foldr (\ t -> (+<>+) (writeIndent ind +<>+ write t +<+ "\n")) (
 writeStmt :: NameSpace m => Int -> ProgStmt -> m String
 
 writeHeader ind (Header name vars) =
-  name +>+ writeIndent ind +<>+ (unwords <$> mapM write vars) +<+ " =\n"
-
-instance Show PMType where
-  show PMAppend = " << "
-  show PMUnord = " ~= "
-  show PMSelect = " <- "
+  writeIndent ind +<>+ name +>+ " " +>+ (unwords <$> mapM write vars) +<+ " =\n"
 
 writeWhereCond :: NameSpace m => Int -> PBool -> m String
 writeWhereCond ind (Const True) = return "\n"
@@ -180,7 +175,7 @@ writeProgram ind (Program h s) = writeHeader ind h +<>+ writeProgTail ind s
 
 writeSwitchCases :: NameSpace m => Int -> [(PAggr, PBool, [ProgStmt])] -> m String
 writeSwitchCases ind ((pat,cond,prog):cs) =
-  writeIndent ind +<>+ write pat +<>+ writeWhereCond (ind+1) cond +<>+ "\n" +>+
+  writeIndent ind +<>+ write pat +<>+ writeWhereCond (ind+1) cond +<>+
   writeIndent ind +<>+ "do\n" +>+
   writeProgTail ind prog +<>+
   writeSwitchCases ind cs
