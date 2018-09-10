@@ -81,6 +81,7 @@ data PTerminal
   | E PEntry
   | Func Int PAggr  -- ^ function call
   | Frag [ProgStmt] -- ^ program fragment
+  | ExtVar Int      -- ^ variable name, used only in fragments
   deriving (Eq, Ord,Show)
 
 data PEntry

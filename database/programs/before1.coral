@@ -10,7 +10,7 @@ f arg thrm =
             Bounds = t2
             Premises = t3
             case (Header, concl) of
-              (h [left_to_right], equivalence [and b | b, c])
+              (h [left_to_right], equivalence [and? b, c])
               (h [left_to_right], equivalence [c, and b | b])
                 where h in [zamenausloviya, zamenatermov]
               do
