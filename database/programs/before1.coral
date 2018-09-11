@@ -10,20 +10,20 @@ f arg thrm =
             Bounds = t2
             Premises = t3
             case (Header, concl) of
-              (h [left_to_right], equivalence [and b | b, c])
+              (h [left_to_right], equivalence [and? b, c])
               (h [left_to_right], equivalence [c, and b | b])
-              where h in [заменаусловия, заменатермов]
+                where h in [zamenausloviya, zamenatermov]
               do
                 list = case h of
-                  заменаусловия -> условия
-                  заменатермов -> premises
-                Identification << {
+                  zamenausloviya -> conditions
+                  zamenatermov -> premises
+                Identification << {<
                   describe = type
                   $b ++other ~= $list
-                }
-                Actions << {
+                >}
+                Actions << {<
                   $list := $c:other
-                }
+                >}
                 done
               (sviazka, equivalence [exists [boundVariables y, and b | b], c])
               do

@@ -175,7 +175,7 @@ writeProgram ind (Program h s) = writeHeader ind h +<>+ writeProgTail ind s
 
 writeSwitchCases :: NameSpace m => Int -> [(PAggr, PBool, [ProgStmt])] -> m String
 writeSwitchCases ind ((pat,cond,prog):cs) =
-  writeIndent ind +<>+ write pat +<>+ writeWhereCond (ind+1) cond +<>+ "\n" +>+
+  writeIndent ind +<>+ write pat +<>+ writeWhereCond (ind+1) cond +<>+
   writeIndent ind +<>+ "do\n" +>+
   writeProgTail ind prog +<>+
   writeSwitchCases ind cs

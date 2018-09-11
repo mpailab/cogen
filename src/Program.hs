@@ -77,10 +77,11 @@ data PTerminal
   = X Int           -- ^ program variable
   | S LSymbol       -- ^ logic symbol
   | AnySymbol       -- ^ '_' symbol means any argument
-  | PV [PTerm]
+  | PV [PTerm]      -- ^ any of subterm variants
   | E PEntry
   | Func Int PAggr  -- ^ function call
   | Frag [ProgStmt] -- ^ program fragment
+  | ExtVar Int      -- ^ variable name, used only in fragments
   deriving (Eq, Ord,Show)
 
 data PEntry
@@ -102,9 +103,9 @@ data PBool
   | BVar Int            -- ^ Boolean global variable
   deriving (Eq, Ord, Show)
 
-type PAggr = Aggregate PTerminal PEntry
+type PAggr = Aggregate PTerminal PEntry PBool
 
-type PComp = Composite PTerminal PEntry
+type PComp = Composite PTerminal PEntry PBool
 
 -- | Type of program terms
 type PExpr = Expr PTerminal PEntry PBool

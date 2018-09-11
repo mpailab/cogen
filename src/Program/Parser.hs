@@ -152,7 +152,7 @@ coralDef = emptyDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
   , reservedOpNames= ["=", "<-", "@", "&&", "||", "|", "+", "-", "*", "/", "&", "$", "<<", "~=", ".."]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
-                      "True", "False", "no", "and", "or", "eq", "ne", "in",
+                      "True", "False", "no", "eq", "ne", "in",
                       "args", "replace", "_", "__"]
   , caseSensitive  = True
   }
@@ -237,19 +237,6 @@ varParser = identifierParser >>= \name -> getLSymbol name >>= \case
   Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
   Nothing -> getPVar name
 
--- entryParser :: NameSpace m => Parser m PEntry
--- entryParser =  try ( do { X n <- varParser
---                         ; reservedOpParser "&"
---                         ; expr <- aggrParser
---                         ; return (Ptr n expr)
---                         } )
---            <|> try ( do { X n <- varParser
---                         ; reservedOpParser "@"
---                         ; expr <- aggrParser
---                         ; return (Ref n expr)
---                         } )
---            <?> "entry"
-
 entryTailParser :: NameSpace m => Bool -> Int -> Parser m PEntry
 entryTailParser trm n = do
   refptr <- (reservedOpParser "&" >> return Ptr) <|> (reservedOpParser "@" >> return Ref)
@@ -262,16 +249,33 @@ entryParser trm = dbg "parse entry" >> do { X n <- varParser
                      ; entryTailParser trm n
                      } <?> "entry"
 
-aggrParser :: NameSpace m => Parser m PAggr
-aggrParser =  dbg "parse aggr" >> (
-              try (Comp <$> compParser <* dbg "return Comp")
-          <|> try (Int  <$> intParser)
-          <|> try (Entr <$> entryParser False)
-          <|> try (Sym  <$> choice [symbolParser, fragParser, reservedParser "_" >> return AnySymbol])
+simpleAggrParser :: NameSpace m => Parser m PAggr
+simpleAggrParser =  dbg "parse aggr" >> (
+              (reservedParser "_" >> return (Sym AnySymbol))
+          <|> (Int  <$> intParser)
+          <|> (compParser >>= \case
+              Term (T s@(S _)) -> return $ Sym s
+              Term (T v@(X n)) ->
+                (Entr <$> entryTailParser False n) <|> return (Sym v)
+              cmp -> return $ Comp cmp
+              -- <* dbg "return Comp"
+              )
           <?> "aggregate")
 
-termParser :: NameSpace m => Parser m PTerm
-termParser =  dbg "parse term " >>
+
+aggrParser :: NameSpace m => Parser m PAggr
+aggrParser =  (Sym <$> fragParser)
+          <|> simpleAggrParser
+          <|> do { reservedParser "case"
+                 ; x <- simpleAggrParser
+                 ; reservedParser "of"
+                 ; cases <- many1 (indentBlock (liftM2 (,) simpleAggrParser (reservedOpParser "->" >> aggrParser)))
+                 ; return $ CaseOf (x, cases)
+                 }
+          <?> "aggregate"
+
+simpleTermParser :: NameSpace m => Parser m PTerm
+simpleTermParser =  dbg "parse one term" >>
       (   parensParser termParser
       <|> (symbolParser >>= \sym ->
               (T . E) <$> tryEntry sym
@@ -282,6 +286,13 @@ termParser =  dbg "parse term " >>
           where
             tryEntry (X n) = dbg "try entry" >> entryTailParser True n
             tryEntry _ = parserZero
+
+
+termParser :: NameSpace m => Parser m PTerm
+termParser =  dbg "parse term variants" >> do
+                first <- simpleTermParser
+                other <- many (reservedOpParser "|" >> simpleTermParser)
+                return $ if other == [] then first else T (PV $ first:other)
 
 compParser :: NameSpace m => Parser m PComp
 compParser =  dbg "parse comp" >> ((List  <$> bracketsParser (commaSepParser aggrParser))
@@ -346,17 +357,17 @@ whereParser ind = dbg "parse where" >> (
 
 -- | Parser of do-statement
 doParser :: NameSpace m => Parser m [ProgStmt]
-doParser = dbg "parse do" >> indentBlock (
-                     reservedParser "do"
-                  >> many stmtParser) <* reservedParserU "done"
+doParser = dbg "parse do" >> indentBlock (reservedParser "do"
+                          >> many stmtParser)
+                          <* reservedParserU "done"
 
 fragParser :: NameSpace m => Parser m PTerminal
 fragParser = dbg "parse fragment" >>  do
-  string "{"
+  string "{<"
   st <- getState
   putState st{ inFrag=True }
   res <- many stmtParser
-  string "}"
+  string ">}"
   putState st
   return $ Frag res
 

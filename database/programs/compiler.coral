@@ -37,8 +37,8 @@ do
               ptr := $To
             }
             done
-          (h [второйтерм], equivalence [conjunction* b, c])
-          (h [второйтерм], equivalence [c, conjunction* b])
+          (h [второйтерм], equivalence [conjunction b | b, c])
+          (h [второйтерм], equivalence [c, conjunction b | b])
           where h in [заменаусловия, заменатермов]
           do
             list = case h of
