@@ -1,9 +1,11 @@
 f arg thrm =
   case arg of
     theorem [thrm]
+
     do
       case thrm of
         forall [boundVariables vars, premises prems, conclusion [concl]] where vars eq thrm
+
         do
           h [x, y] = concl
             where

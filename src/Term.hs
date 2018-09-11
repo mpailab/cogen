@@ -32,7 +32,7 @@ import           Data.Char
 data Term a = T a
             | a :> [Term a]
             | a :>> a
-            deriving (Eq, Ord)
+            deriving (Eq, Ord, Show)
 
 instance Foldable Term where
   foldMap f (T x)     = f x

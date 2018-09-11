@@ -134,11 +134,6 @@ writeStmt :: NameSpace m => Int -> ProgStmt -> m String
 writeHeader ind (Header name vars) =
   writeIndent ind +<>+ name +>+ " " +>+ (unwords <$> mapM write vars) +<+ " =\n"
 
-instance Show PMType where
-  show PMAppend = " << "
-  show PMUnord = " ~= "
-  show PMSelect = " <- "
-
 writeWhereCond :: NameSpace m => Int -> PBool -> m String
 writeWhereCond ind (Const True) = return "\n"
 writeWhereCond ind (And conds) = "\n" +>+

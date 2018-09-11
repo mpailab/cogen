@@ -29,14 +29,14 @@ data Aggregate a b
   | Int Int
   | Entr b
   | Comp (Composite a b)
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 data Composite a b
   = List [Aggregate a b]
   | Tuple [Aggregate a b]
   | Set [Aggregate a b]
   | Term (Term a)
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 data Expr a b c
   = NONE

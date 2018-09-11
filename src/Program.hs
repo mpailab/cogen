@@ -74,31 +74,33 @@ import           Term
 -- Data types and clases declaration
 
 data PTerminal
-  = X Int
-  | S LSymbol
-  | AnySymbol
+  = X Int           -- ^ program variable
+  | S LSymbol       -- ^ logic symbol
+  | AnySymbol       -- ^ '_' symbol means any argument
+  | PV [PTerm]
   | E PEntry
-  | Func Int PAggr -- ^ function call
+  | Func Int PAggr  -- ^ function call
   | Frag [ProgStmt] -- ^ program fragment
-  deriving (Eq, Ord)
+  deriving (Eq, Ord,Show)
 
 data PEntry
   = Ptr Int PAggr
   | Ref Int PAggr
   | Inside PAggr
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 type PTerm = Term PTerminal
 
 data PBool
-  = Const Bool
-  | Equal PTerm PTerm
-  | NEqual PTerm PTerm
-  | In PTerm PComp
-  | Not PBool
-  | And [PBool]
-  | Or [PBool]
-  deriving (Eq, Ord)
+  = Const Bool          -- ^ Boolean constant (True or False)
+  | Equal PTerm PTerm   -- ^ statement A eq B
+  | NEqual PTerm PTerm  -- ^ statement A ne B
+  | In PTerm PComp      -- ^ statement A in B
+  | Not PBool           -- ^ statement not A
+  | And [PBool]         -- ^ statement A and B
+  | Or [PBool]          -- ^ statement A or B
+  | BVar Int            -- ^ Boolean global variable
+  deriving (Eq, Ord, Show)
 
 type PAggr = Aggregate PTerminal PEntry
 
@@ -112,6 +114,11 @@ data PMType = PMSelect -- ^ match patterns with list elements (l1,...,lN <- righ
             | PMUnord  -- ^ match list pattern with list of elements in any order (left ~= right)
             | PMAppend -- ^ appends right part to variable (left << right)
             deriving (Eq, Ord)
+
+instance Show PMType where
+  show PMAppend = " << "
+  show PMUnord = " ~= "
+  show PMSelect = " <- "
 
 data Header = Header
   {
@@ -157,7 +164,7 @@ data ProgStmt
   -- | program fragment variable with delayed substitution
   | DelayedFrag PTerm
 
-  deriving(Eq,Ord)
+  deriving(Eq,Ord,Show)
 
 -- | Type of program : header + command list
 data Program = Program Header [ProgStmt]

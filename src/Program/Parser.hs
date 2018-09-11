@@ -150,10 +150,10 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-", "@", "&", "$", "<<", "~=", "_", "__", ".."]
+  , reservedOpNames= ["=", "<-", "@", "&&", "||", "|", "+", "-", "*", "/", "&", "$", "<<", "~=", ".."]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "and", "or", "eq", "ne", "in",
-                      "args", "replace"]
+                      "args", "replace", "_", "__"]
   , caseSensitive  = True
   }
 
@@ -267,17 +267,17 @@ aggrParser =  dbg "parse aggr" >> (
               try (Comp <$> compParser <* dbg "return Comp")
           <|> try (Int  <$> intParser)
           <|> try (Entr <$> entryParser False)
-          <|> try (Sym  <$> (symbolParser <|> fragParser))
+          <|> try (Sym  <$> choice [symbolParser, fragParser, reservedParser "_" >> return AnySymbol])
           <?> "aggregate")
 
 termParser :: NameSpace m => Parser m PTerm
-termParser =  getPos >>= \pos -> traceM ("parse term "++show pos) >>
+termParser =  dbg "parse term " >>
       (   parensParser termParser
       <|> (symbolParser >>= \sym ->
               (T . E) <$> tryEntry sym
           <|> (sym :>) <$> (dbg "try brackets" >> bracketsParser (commaSepParser termParser <|> return []))
           <|> (sym :>>) <$> (dbg "try :>> var" >> indented >> varParser)
-          <|> (dbg "return T sym" >> return (T sym))))
+          <|> (dbg ("return T "++show sym) >> return (T sym))))
           <?> "term"
           where
             tryEntry (X n) = dbg "try entry" >> entryTailParser True n
@@ -291,41 +291,37 @@ compParser =  dbg "parse comp" >> ((List  <$> bracketsParser (commaSepParser agg
           <?> "composite")
 
 relationParser :: NameSpace m => Parser m PBool
-relationParser =  try ( do {
-                           ; left <- termParser
-                           ; reservedParser "eq"
-                           ; right <- termParser
-                           ; return (Equal left right)
-                           } )
-              <|> try ( do {
-                           ; left <- termParser
-                           ; reservedParser "ne"
-                           ; right <- termParser
-                           ; return (NEqual left right)
-                           } )
-              <|> try ( do {
-                           ; term <- termParser
-                           ; reservedParser "in"
-                           ; set <- compParser
-                           ; return (In term set)
-                           } )
+relationParser = termParser >>= \left ->
+                  do {
+                     ; rel <- choice[reservedParser "eq" >> return Equal, reservedParser "ne" >> return NEqual]
+                     ; right <- termParser
+                     ; return (rel left right)
+                     }
+              <|> do {
+                     ; reservedParser "in"
+                     ; set <- compParser
+                     ; return (In left set)
+                     }
+              <|> case left of
+                    T (X n) -> return (BVar n) -- ^ global variable
+                    _ -> parserZero
               <?> "relation"
 
 atomBool :: NameSpace m => Parser m PBool
-atomBool =  try (parensParser boolParser)
-        <|> try (reservedParser "True"  >> return (Const True ))
-        <|> try (reservedParser "False" >> return (Const False))
-        <|> try relationParser
-        <?> "atomic bool"
+atomBool =  dbg "atomBool" >> (parensParser boolParser
+        <|> (reservedParser "True"  >> return (Const True ))
+        <|> (reservedParser "False" >> return (Const False))
+        <|> relationParser
+        <?> "atomic bool")
 
 boolParser :: NameSpace m => Parser m PBool
 boolParser = buildExpressionParser tableBool atomBool
-          <?> "bool"
+          <?> "boolean expression expected"
 
 tableBool :: NameSpace m => [[Operator Text.Text PState m PBool]]
-tableBool = [ [Prefix (reservedParser "no"  >> return pNot)]
-            , [Infix  (reservedParser "and" >> return pAnd) AssocRight]
-            , [Infix  (reservedParser "or"  >> return pOr)  AssocRight]
+tableBool = [ [Prefix (dbg "try parse no" >> reservedParser "no"  >> return pNot)]
+            , [Infix  (dbg "try parse and" >> reservedOpParser "&&" >> return pAnd) AssocRight]
+            , [Infix  (dbg "try parse or" >> reservedOpParser "||"  >> return pOr)  AssocRight]
             ]
 
 -- | Parser of program expressions
@@ -379,18 +375,19 @@ caseParser = do
 
 -- | Parser of statements
 stmtParser :: NameSpace m => Parser m ProgStmt
-stmtParser = (dbg "parse statement " >> (try . indentBlock) (
+stmtParser = (dbg "parse statement " >> try (
          -- Parse an assigning instruction
 
          -- Parse an branching instruction
-             do { reservedParser "if"
-                ; c <- boolParser
+             do { -- reservedParser "if"
+                ; c <- indentBlock (reservedParser "if" >> boolParser)
                 ; b <- doParser
                 ; return (Branch c b)
                 }
 
          -- Parse an switching instruction
-         <|> do { reservedParser "case"
+         <|> indentBlock (
+             do { reservedParser "case"
                 ; dbg "case found"
                 ; e <- aggrParser
                 ; dbg "case expression read"
@@ -413,7 +410,7 @@ stmtParser = (dbg "parse statement " >> (try . indentBlock) (
              do { c <- whereParser True
                 ; return (Action p c)
                 })
-         <?> "Statement")) <|> (dbg "no statement" >> parserZero)
+         <?> "Statement"))) <|> (dbg "no statement" >> parserZero)
 
 -- | Program header parser
 headerParser :: NameSpace m => Parser m Header
