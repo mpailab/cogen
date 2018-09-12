@@ -41,11 +41,11 @@ instance Write Program where
 
 instance Write PExpr where
   write NONE     = return "NONE"
-  write (Aggr x) = write x
+  write (Val x) = write x
   write (Bool x) = write x
 
-instance Write PAggr where
-  write = writeAggr False
+instance Write PVExpr where
+  write = writeVExpr False
 
 instance Write PBool where
   write = writeBool False
@@ -85,9 +85,9 @@ writeSymbol (S s) = nameLSymbol s
 writeSymbol (E e) = writeEntry False e
 
 writeEntry :: NameSpace m => Bool -> PEntry -> m String
-writeEntry par (Ref n x)  = writeVar n +<>+ "@" +>+ writeAggr True x
-writeEntry par (Ptr n x)  = writeVar n +<>+ "&" +>+ writeAggr True x
-writeEntry par (Inside x) = writeAggr par x
+writeEntry par (Ref n x)  = writeVar n +<>+ "@" +>+ writeVExpr True x
+writeEntry par (Ptr n x)  = writeVar n +<>+ "&" +>+ writeVExpr True x
+writeEntry par (Inside x) = writeVExpr par x
 
 writeTerm :: NameSpace m => Bool -> PTerm -> m String
 writeTerm par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
@@ -97,17 +97,14 @@ writeTerm par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
                   " [" +>+ writeSequence y (writeTerm False) +<+ "]", True)
     f (x :>> y) = (writeSymbol x +<>+ " " +>+ writeSymbol y, True)
 
-writeComp :: NameSpace m => Bool -> PComp -> m String
-writeComp par (List x)  = "[" +>+ writeSequence x (writeAggr False) +<+ "]"
-writeComp par (Tuple x) = "(" +>+ writeSequence x (writeAggr False) +<+ ")"
-writeComp par (Set x)   = "{" +>+ writeSequence x (writeAggr False) +<+ "}"
-writeComp par (Term x)  = writeTerm par x
-
-writeAggr :: NameSpace m => Bool -> PAggr -> m String
-writeAggr par (Sym x)  = writeSymbol x
-writeAggr par (Int x)  = return (show x)
-writeAggr par (Entr x) = writeEntry par x
-writeAggr par (Comp x) = writeComp par x
+writeVExpr :: NameSpace m => Bool -> PVExpr -> m String
+writeVExpr par (Sym x)  = writeSymbol x
+writeVExpr par (Int x)  = return (show x)
+writeVExpr par (Entr x) = writeEntry par x
+writeVExpr par (List x)  = "[" +>+ writeSequence x (writeVExpr False) +<+ "]"
+writeVExpr par (Tuple x) = "(" +>+ writeSequence x (writeVExpr False) +<+ ")"
+writeVExpr par (Set x)   = "{" +>+ writeSequence x (writeVExpr False) +<+ "}"
+writeVExpr par (Term x)  = writeTerm par x
 
 writeBool :: NameSpace m => Bool -> PBool -> m String
 writeBool par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
@@ -116,7 +113,7 @@ writeBool par t = let (x,y) = f t in if par && y then "(" +>+ x +<+ ")" else x
     f (Const False)    = (return "False", False)
     f (Equal x y)      = (writeTerm True x +<>+ " eq " +>+ writeTerm True y, True)
     f (NEqual x y)     = (writeTerm True x +<>+ " ne " +>+ writeTerm True y, True)
-    f (In x y)         = (writeTerm True x +<>+ " in " +>+ writeComp True y, True)
+    f (In x y)         = (writeTerm True x +<>+ " in " +>+ writeVExpr True y, True)
     f (Not x)          = ("no " +>+ writeBool True x, True)
     f (And x)          = (writeInfx "and" x (writeBool True), True)
     f (Or x)           = (writeInfx "or" x (writeBool True), True)
@@ -143,7 +140,7 @@ writeWhereCond ind (And conds) = "\n" +>+
 writeWhereCond ind cond = " where " +>+ write cond  +<+ "\n"
 
 -- | Write an assigning instruction of program fragment corresponding to a given indent
-writeStmt ind (Assign PMSelect pat (Comp (List [val])) cond) =
+writeStmt ind (Assign PMSelect pat (List [val]) cond) =
   writeIndent ind +<>+ write pat +<>+ " = " +>+ write val +<>+ writeWhereCond ind cond
 
 writeStmt ind (Assign tp pat gen cond) =
@@ -173,7 +170,7 @@ writeProgTail ind = foldr ((+<>+) . writeStmt (ind+1)) (writeIndent ind +<+ "don
 writeProgram :: NameSpace m => Int -> Program -> m String
 writeProgram ind (Program h s) = writeHeader ind h +<>+ writeProgTail ind s
 
-writeSwitchCases :: NameSpace m => Int -> [(PAggr, PBool, [ProgStmt])] -> m String
+writeSwitchCases :: NameSpace m => Int -> [(PVExpr, PBool, [ProgStmt])] -> m String
 writeSwitchCases ind ((pat,cond,prog):cs) =
   writeIndent ind +<>+ write pat +<>+ writeWhereCond (ind+1) cond +<>+
   writeIndent ind +<>+ "do\n" +>+

@@ -42,9 +42,8 @@ module Program
       Program.Base,
       Program.Vars,
       Programs,
-      PAggr,
+      PVExpr,
       PBool(..),
-      PComp(..),
       PEntry(..),
       PExpr,
       PMType(..),
@@ -77,37 +76,40 @@ data PTerminal
   = X Int           -- ^ program variable
   | S LSymbol       -- ^ logic symbol
   | AnySymbol       -- ^ '_' symbol means any argument
+  | AnySequence     -- ^ '__' means any sequence of program expressions
   | PV [PTerm]      -- ^ any of subterm variants
   | E PEntry
-  | Func Int PAggr  -- ^ function call
+  -- | Func Int PVExpr  -- ^ function call
   | Frag [ProgStmt] -- ^ program fragment
   | ExtVar Int      -- ^ variable name, used only in fragments
+  | IfElse PBool PVExpr PVExpr
+  | CaseOf PVExpr [(PVExpr, PVExpr)]
+  | Fun Program
   deriving (Eq, Ord,Show)
 
 data PEntry
-  = Ptr Int PAggr
-  | Ref Int PAggr
-  | Inside PAggr
+  = Ptr Int PVExpr
+  | Ref Int PVExpr
+  | Inside PVExpr
   deriving (Eq, Ord, Show)
 
+-- | Type of program term
 type PTerm = Term PTerminal
 
 data PBool
   = Const Bool          -- ^ Boolean constant (True or False)
   | Equal PTerm PTerm   -- ^ statement A eq B
   | NEqual PTerm PTerm  -- ^ statement A ne B
-  | In PTerm PComp      -- ^ statement A in B
+  | In PTerm PVExpr     -- ^ statement A in B
   | Not PBool           -- ^ statement not A
   | And [PBool]         -- ^ statement A and B
   | Or [PBool]          -- ^ statement A or B
   | BVar Int            -- ^ Boolean global variable
   deriving (Eq, Ord, Show)
 
-type PAggr = Aggregate PTerminal PEntry PBool
+type PVExpr = VExpr PTerminal PEntry
 
-type PComp = Composite PTerminal PEntry PBool
-
--- | Type of program terms
+-- | Type of program expressions
 type PExpr = Expr PTerminal PEntry PBool
 
 -- | type of assignment statement
@@ -126,7 +128,7 @@ data Header = Header
     name      :: String,
     arguments :: [PTerminal]
   }
-  deriving (Eq, Ord)
+  deriving (Eq, Ord,Show)
 
 -- | Type of program statement
 data ProgStmt
@@ -135,8 +137,8 @@ data ProgStmt
   = Assign
     {
       pmtype    :: PMType, -- ^ type of pattern matching in assignment
-      pattern_  :: PAggr,  -- ^ assigned pattern
-      generate  :: PAggr,  -- ^ generator of list of terms
+      pattern_  :: PVExpr,  -- ^ assigned pattern
+      generate  :: PVExpr,  -- ^ generator of list of terms
       condition :: PBool   -- ^ condition for iterating of terms
     }
   -- | Branching instruction jumps to a given program fragment
@@ -150,15 +152,15 @@ data ProgStmt
   -- | Switching instruction jumps to a program fragment defined by a given expression
   | Switch
     {
-      expression :: PAggr,              -- ^ expression
+      expression :: PVExpr,              -- ^ expression
       condition  :: PBool,              -- ^ condition for switching
-      cases      :: [(PAggr, PBool, [ProgStmt])]  -- ^ list of pairs (pattern, program fragment)
+      cases      :: [(PVExpr, PBool, [ProgStmt])]  -- ^ list of pairs (pattern, program fragment)
     }
 
   -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
-      action    :: PAggr,  -- ^ action
+      action    :: PVExpr,  -- ^ action
       condition :: PBool   -- ^ condition of action
     }
 
@@ -170,7 +172,7 @@ data ProgStmt
 -- | Type of program : header + command list
 data Program = Program Header [ProgStmt]
   | Empty
-  deriving(Eq,Ord)
+  deriving(Eq,Ord,Show)
 
 -- | Type of programs database
 type Programs = M.Map LSymbol Program

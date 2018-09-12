@@ -19,7 +19,7 @@ f arg thrm =
                   zamenatermov -> premises
                 Identification << {<
                   describe = type
-                  $b ++other ~= $list
+                  $b ++other ~= $list()
                 >}
                 Actions << {<
                   $list := $c:other

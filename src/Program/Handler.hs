@@ -61,6 +61,10 @@ instance Eq ExprPtr where
   (==) _ _ = False
   (/=) _ _ = True
 
+data LTerminal
+  = LSym LSymbol
+  | LFun ([LExpr] -> LExpr)
+
 type LExpr = Expr LSymbol ExprPtr Bool
 
 -- class Expression a where

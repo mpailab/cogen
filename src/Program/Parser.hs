@@ -71,7 +71,7 @@ getPos :: NameSpace m => Parser m (Int,Int)
 getPos = getPosition >>= \pos -> return (sourceLine pos, sourceColumn pos)
 
 dbg :: NameSpace m => String -> Parser m ()
-dbg name = getPos >>= \pos -> traceM (name++" "++show pos)
+dbg name = getPos >>= \pos -> echo (name++" "++show pos)
 
 beginIndent :: NameSpace m => Parser m ()
 beginIndent = whiteSpaceParser >> do
@@ -240,7 +240,7 @@ varParser = identifierParser >>= \name -> getLSymbol name >>= \case
 entryTailParser :: NameSpace m => Bool -> Int -> Parser m PEntry
 entryTailParser trm n = do
   refptr <- (reservedOpParser "&" >> return Ptr) <|> (reservedOpParser "@" >> return Ref)
-  expr <- if trm then (Comp . Term) <$> termParser else aggrParser
+  expr <- if trm then Term <$> termParser else aggrParser
   return (refptr n expr)
 
 
@@ -249,7 +249,7 @@ entryParser trm = dbg "parse entry" >> do { X n <- varParser
                      ; entryTailParser trm n
                      } <?> "entry"
 
-simpleAggrParser :: NameSpace m => Parser m PAggr
+simpleAggrParser :: NameSpace m => Parser m PVExpr
 simpleAggrParser =  dbg "parse aggr" >> (
               (reservedParser "_" >> return (Sym AnySymbol))
           <|> (Int  <$> intParser)
@@ -257,20 +257,20 @@ simpleAggrParser =  dbg "parse aggr" >> (
               Term (T s@(S _)) -> return $ Sym s
               Term (T v@(X n)) ->
                 (Entr <$> entryTailParser False n) <|> return (Sym v)
-              cmp -> return $ Comp cmp
+              cmp -> return cmp
               -- <* dbg "return Comp"
               )
           <?> "aggregate")
 
 
-aggrParser :: NameSpace m => Parser m PAggr
+aggrParser :: NameSpace m => Parser m PVExpr
 aggrParser =  (Sym <$> fragParser)
           <|> simpleAggrParser
           <|> do { reservedParser "case"
                  ; x <- simpleAggrParser
                  ; reservedParser "of"
                  ; cases <- many1 (indentBlock (liftM2 (,) simpleAggrParser (reservedOpParser "->" >> aggrParser)))
-                 ; return $ CaseOf (x, cases)
+                 ; return $ Sym (CaseOf x cases)
                  }
           <?> "aggregate"
 
@@ -292,9 +292,9 @@ termParser :: NameSpace m => Parser m PTerm
 termParser =  dbg "parse term variants" >> do
                 first <- simpleTermParser
                 other <- many (reservedOpParser "|" >> simpleTermParser)
-                return $ if other == [] then first else T (PV $ first:other)
+                return $ if null other then first else T (PV $ first:other)
 
-compParser :: NameSpace m => Parser m PComp
+compParser :: NameSpace m => Parser m PVExpr
 compParser =  dbg "parse comp" >> ((List  <$> bracketsParser (commaSepParser aggrParser))
           <|> (Tuple <$> parensParser   (commaSepParser aggrParser))
           <|> (Set   <$> bracesParser   (commaSepParser aggrParser))
@@ -338,7 +338,7 @@ tableBool = [ [Prefix (dbg "try parse no" >> reservedParser "no"  >> return pNot
 -- | Parser of program expressions
 exprParser :: NameSpace m => Parser m PExpr
 exprParser =  dbg "parse expr" >> (
-              try (Aggr <$> aggrParser)
+              try (Val <$> aggrParser)
           <|> try (Bool <$> boolParser)
           <?> "expr")
 
@@ -376,7 +376,7 @@ nameParser = identifierParser >>= \name -> getLSymbol name >>= \case
   Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
   Nothing -> return name
 
-caseParser :: NameSpace m => Parser m [(PAggr, PBool, [ProgStmt])]
+caseParser :: NameSpace m => Parser m [(PVExpr, PBool, [ProgStmt])]
 caseParser = do
   pts <- many1 . indentBlock $ liftM2 (,) aggrParser (option (Const True) (indentBlock $ whereParser False))
   dbg "done cases, find do"
@@ -413,7 +413,7 @@ stmtParser = (dbg "parse statement " >> try (
                 (tp,g) <- (,) PMSelect <$> ((reservedOpParser "=" >> toList <$> aggrParser)
                       <|> (reservedOpParser "<-" >> aggrParser))
                       <|> (,) PMUnord <$> (reservedOpParser "=~" >> aggrParser)
-                      <|> (,) PMAppend . Comp . List <$> many1 (reservedOpParser "<<" >> aggrParser)
+                      <|> (,) PMAppend . List <$> many1 (reservedOpParser "<<" >> aggrParser)
                 ; c <- whereParser True
                 ; return (Assign tp p g c)
                 } <|>
@@ -442,8 +442,8 @@ programParser = do
 -- Composing functions
 
 -- | Convert a program term to list of terms
-toList :: PAggr -> PAggr
-toList x = Comp (List [x])
+toList :: PVExpr -> PVExpr
+toList x = List [x]
 
 -- | Negate a given program term
 pNot :: PBool -> PBool

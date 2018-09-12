@@ -10,8 +10,7 @@ Portability : POSIX
 module Expr
     (
       -- exports
-      Aggregate(..),
-      Composite(..),
+      VExpr(..),
       Expr(..)
     )
 where
@@ -25,32 +24,23 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-data Aggregate a b c
+-- | type of expression that returns value
+--   common part of logical and program expressions
+data VExpr a b
   = Sym a
   | Int Int
   | Entr b
-  | Comp (Composite a b c)
-  | IfElse (c, Aggregate a b c)
-  | CaseOf (Aggregate a b c, [(Aggregate a b c, Aggregate a b c)])
-  deriving (Eq, Ord, Show)
-
--- data Conditional a b c
---   = IfElse (c, Aggregate a b c)
---   | CaseOf (Aggregate a b c, [Aggregate a b c])
---   deriving (Eq, Ord, Show)
-
-type HTable a b c = M.Map a [Aggregate a b c]
-
-data Composite a b c
-  = List [Aggregate a b c]
-  | Tuple [Aggregate a b c]
-  | Table (HTable a b c)
-  | Set [Aggregate a b c]
+  | List [VExpr a b]
+  | Tuple [VExpr a b]
+  | Table (HTable a b) -- | ????????
+  | Set [VExpr a b]
   | Term (Term a)
   deriving (Eq, Ord, Show)
 
+type HTable a b = M.Map a [VExpr a b]
+
 data Expr a b c
   = NONE
-  | Aggr (Aggregate a b c)
+  | Val (VExpr a b)
   | Bool c
   deriving (Eq, Ord)
