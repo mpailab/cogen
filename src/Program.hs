@@ -107,7 +107,7 @@ data PBool
   | BVar Int            -- ^ Boolean global variable
   deriving (Eq, Ord, Show)
 
-type PVExpr = VExpr PTerminal PEntry
+type PVExpr = Expr' PTerminal PEntry
 
 -- | Type of program expressions
 type PExpr = Expr PTerminal PEntry PBool

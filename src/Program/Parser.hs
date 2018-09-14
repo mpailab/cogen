@@ -338,7 +338,7 @@ tableBool = [ [Prefix (dbg "try parse no" >> reservedParser "no"  >> return pNot
 -- | Parser of program expressions
 exprParser :: NameSpace m => Parser m PExpr
 exprParser =  dbg "parse expr" >> (
-              try (Val <$> aggrParser)
+              try (Aggr <$> aggrParser)
           <|> try (Bool <$> boolParser)
           <?> "expr")
 

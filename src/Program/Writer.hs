@@ -41,7 +41,7 @@ instance Write Program where
 
 instance Write PExpr where
   write NONE     = return "NONE"
-  write (Val x) = write x
+  write (Aggr x) = write x
   write (Bool x) = write x
 
 instance Write PVExpr where
