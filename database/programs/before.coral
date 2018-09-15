@@ -8,11 +8,12 @@ f arg thrm =
       case thrm of
         forall [boundVariables vars, premises prems, conclusion [concl]] where vars eq thrm
         do
-          h [x, y] = concl where h in [equality, equivalence] -- comment 2
-            x eq y -- comment 3
-          Efgh = x -- cbcd
-          Abcd = h
-          x_header [equality [a&(plus [p&x1, x2]), b@(plus [x3, x1])]] <- x
+          h [plus[_,x]] | h [x] = concl where h in [equality, equivalence] -- comment 2
+            x eq y      -- comment 3
+          Efgh = x `f` y -- call f x y
+          Abcd = h` abcd `y
+          g = case t of {f [a,b] -> g [b,a]; [__,c] -> g [e,c]; h g -> g; x -> s [x]}
+          x_header [equality [a&(plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
         done
-      done
-  done
+    done
+done

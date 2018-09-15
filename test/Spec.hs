@@ -46,6 +46,6 @@ main :: IO ()
 main = do
   createDirectoryIfMissing False "tmp"
   putStrLn "Run tests:"
-  let test_num = 2 in mapM runTest [1..test_num]
+  let test_num = 1 in mapM runTest [1..test_num]
   putStrLn "Done"
   removeDirectoryRecursive "tmp"

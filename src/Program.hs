@@ -79,7 +79,7 @@ data PTerminal
   | AnySequence     -- ^ '__' means any sequence of program expressions
   | PV [PTerm]      -- ^ any of subterm variants
   | E PEntry
-  -- | Func Int PVExpr  -- ^ function call
+  | FunCall PVExpr PVExpr  -- ^ function call
   | Frag [ProgStmt] -- ^ program fragment
   | ExtVar Int      -- ^ variable name, used only in fragments
   | IfElse PBool PVExpr PVExpr
