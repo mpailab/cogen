@@ -11,6 +11,10 @@ f arg thrm =
               x eq y
           Efgh = f` x y
           Abcd = h` (y` abcd)
+          Identification << {<
+              describe = type
+              concat` $b other ~= $list` 
+          >}
           G = case g` t of {f [a, b] -> g [b, a]; [__, c] -> g [e, c]; _ g -> g; _ -> s}
           x_header [equality [a&(plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
         done

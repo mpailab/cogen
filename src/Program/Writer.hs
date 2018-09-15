@@ -48,6 +48,8 @@ class NameSpace m => ProgWriter m where
 
   indented :: (a -> m String) -> a -> m String
   indented wr x = do { inci; str <- wr x; deci; return str }
+  indented0 :: m String -> m String
+  indented0 wr = indented (\()->wr) ()
 
 type SimpleWriter m = StateT Int m
 
@@ -145,6 +147,9 @@ writeSymbol par (CaseOf pat cases) = inpars par $
 
 writeSymbol par (PV vars) = inpars par $ writeSequenceS " | " vars writeI
 
+writeSymbol _ (Frag f) = "{<\n" +>+ indented0 (
+                  writeSequenceS "" f (indented writeStmt)
+                ) +<>+ indent +<+ ">}"
 -- writeSymbol _ (Frag frag) = "{" +>+
 
 writeEntry :: ProgWriter m => Bool -> PEntry -> m String
@@ -207,6 +212,9 @@ writeStmt :: ProgWriter m => ProgStmt -> m String
 writeStmt (Assign PMSelect pat (List [val]) cond) =
   indent +<>+ writeI pat +<>+ " = " +>+ writeI val +<>+ writeWhereCond cond
 
+writeStmt (Assign PMAppend pat (List frags) cond) =
+    indent +<>+ writeI pat +<>+ writeSequenceS "" frags (\f -> show PMAppend +>+ writeI f) +<>+ writeWhereCond cond
+  
 writeStmt (Assign tp pat gen cond) =
   indent +<>+ writeI pat +<>+ show tp +>+ writeI gen +<>+ writeWhereCond cond
 

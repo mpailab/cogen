@@ -310,7 +310,7 @@ pattp NoPattern _ = NoPattern
 pattp _ pt = pt
 
 anySeq :: NameSpace m => Parser m PTerminal
-anySeq = ispattern >> (
+anySeq = ispattern >> try (
   (reservedParser "__" >> return AnySequence) <|> do {
   ; X n <- varParser
   ; reservedOpParser "@" >> reservedParser "__"
@@ -401,8 +401,8 @@ vexprTailParser h = (dbg "try expr `" >> funcApp >> (Sym . FunCall h . List) <$>
                 <|> return h
 
 -- | parse VExpr, first argument means allow or not pattern-matching
-vexprParser :: NameSpace m => Parser m PVExpr
-vexprParser = Sym <$> fragParser
+atomExprParser :: NameSpace m => Parser m PVExpr
+atomExprParser = Sym <$> fragParser
           <|> (simpleVExprParser >>= vexprTailParser)
           <|> (Sym <$> complexExprParser False >>= vexprTailParser)
           <?> "vexpr"
@@ -494,22 +494,30 @@ tableBool = [ [Prefix (dbg "try parse no" >> reservedParser "no"  >> return pNot
             ]
 
 tableExpr ::  NameSpace m => [[Operator Text.Text PState m PVExpr]]
-tableExpr = [ [Infix  (dbg "try parse ++" >> op False ":") AssocRight]
-            , [Infix  (dbg "try parse or" >> op True "++")  AssocRight]
+tableExpr = [ [Infix  (dbg "try parse ^" >> op False "^") AssocRight]
+            , [Infix  (dbg "try parse *" >> op True "*") AssocLeft
+              ,Infix  (dbg "try parse /" >> op False "/") AssocLeft]
+            , [Infix  (dbg "try parse +" >> op True "+") AssocLeft
+              ,Infix  (dbg "try parse -" >> op False "-") AssocLeft]
+            , [Infix  (dbg "try parse :" >> op False ":") AssocRight]
+            , [Infix  (dbg "try parse ++" >> op True "++")  AssocRight]
             ] where op assoc name = reservedOpParser name >> makeBinOp assoc name
 
 makeBinOp :: NameSpace m => Bool -> String -> Parser m (PVExpr -> PVExpr -> PVExpr)
 makeBinOp assoc name = do {
-  ; Just op <- getLSymbol name
-  ; return (\x y -> let args t@(Sym (FunCall (Sym (S o)) (List a))) = if o==op then a else [t] in
-                       Sym $ FunCall (Sym $ S op) (List $ args x++args y))
-}
+  ; s <- getLSymbol name
+  ; op <- case s of {Just x -> return x; _ -> parserZero <?> "unknown operator "++name}
+  ; return (\x y -> Sym $ FunCall (Sym $ S op) (List $ args op x++args op y))   
+} where args op t@(Sym (FunCall (Sym (S o)) (List a))) = if o==op then a else [t]
+        args _ t = [t]
 
+vexprParser :: NameSpace m => Parser m PVExpr 
+vexprParser = buildExpressionParser tableExpr atomExprParser
 
 -- | Parser of program expressions
 exprParser :: NameSpace m => Parser m PExpr
 exprParser = dbg "parse expr" >> (
-                  try (Val <$> buildExpressionParser tableExpr vexprParser)
+                  try (Val <$> vexprParser)
               <|> try (Bool <$> boolParser)
               <?> "expr")
 
@@ -534,12 +542,12 @@ doParser = dbg "parse do" >> indentBlock (reservedParser "do"
 
 fragParser :: NameSpace m => Parser m PTerminal
 fragParser = dbg "parse fragment" >>  do
-  string "{<"
+  string "{<" >> whiteSpaceParser
   st <- getState
   putState st{ inFrag=True }
   res <- many stmtParser
-  string ">}"
-  putState st
+  string ">}" >> whiteSpaceParser
+  modifyState (\s -> s{ inFrag = inFrag st })
   return $ Frag res
 
 nameParser:: NameSpace m => Parser m String
@@ -583,7 +591,7 @@ stmtParser = (dbg "parse statement " >> try (
           <|> (inpattern vexprParser >>= \p -> do{ -- ??? now we allow patterns in right part : [A, x [_,x [__]]] = [f [_, g[__]], B], where A,B,f,g are defined, x must be defined by this expression
                 (tp,g) <- (,) PMSelect <$> ((reservedOpParser "=" >> toList <$> inpattern vexprParser)
                       <|> (reservedOpParser "<-" >> inpattern vexprParser))
-                      <|> (,) PMUnord <$> (reservedOpParser "=~" >> inpattern vexprParser)
+                      <|> (,) PMUnord <$> (reservedOpParser "~=" >> inpattern vexprParser)
                       <|> (,) PMAppend . List <$> many1 (reservedOpParser "<<" >> inpattern vexprParser)
                 ; c <- whereParser True
                 ; return (Assign tp p g c)

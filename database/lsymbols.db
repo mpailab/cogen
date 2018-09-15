@@ -90,5 +90,19 @@ Symbol {
   synonyms          = [],
   categories        = [],
   description       = ""
+},
+Symbol {
+  id                = 14,
+  name              = "concat",
+  synonyms          = ["++"],
+  categories        = [],
+  description       = ""
+},
+Symbol {
+  id                = 15,
+  name              = "prepend",
+  synonyms          = [":"],
+  categories        = [],
+  description       = ""
 }
 ]
