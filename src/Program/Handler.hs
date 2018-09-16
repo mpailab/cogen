@@ -331,20 +331,90 @@ type Handler = StateT Info
 --   is_match <- liftM2 (\x (BE y) -> x && y) (ident p e <* saveAssignments) (eval c) -- identify term with expression by condition
 --   unless is_match (put state) -- restore current state of Handler if necessary
 --   return is_match
---
---
--- -- | Run a program fragment
--- run :: Monad m => Program -> Handler m ()
---
--- run (Header n vs p) = run p
---
--- run (Assign p g c j) = case g of
---   List [e] -> f e
---   List es  -> mapM_ f es
---   _        -> eval g >>= \(LE es) -> mapM_ h es
---   where
---     f e = identC p e c >>= \jump -> when jump (run j)
---     h e = identExprC p e c >>= \jump -> when jump (run j)
+
+
+-- | Run a list of commands
+run :: Monad m => [Command] -> Handler m LExpr
+
+run ((Assign PMSelect p g c) : cs) =
+  eval p >>= \case
+    (List ps) -> (eval g >>= \case
+      (List gs) -> when (length ps <= length gs) (f ps gs)
+      _         -> error "Unsupported value in PMSelect assignment command")
+    _         -> error "Unsupported pattern in PMSelect assignment command"
+  where
+    f [] _ = do
+      -- check the condition
+      is_match <- eval c
+      -- run the next command if necessary
+      when is_match (run cs)
+
+    f (x:xs) (y:ys) = do
+      -- save current state of Handler
+      state <- get
+      -- identify the first pattern with the first value
+      is_match <- ident x y
+      -- continue the identification of remaining patterns
+      when is_match (saveAssignments *> f xs ys)
+      -- restore current state of Handler
+      put state
+      -- identify the list of patterns with the tail of values
+      f (x:xs) ys
+
+run ((Assign PMUnord p g c) : cs) =
+  eval g >>= \case
+  (List gs) -> (eval p >>= \case
+    (List ps)     -> when (length ps == length gs) (f ps gs)
+    (List_ ps pt) -> when (length ps <= length gs) (h ps pt gs)
+    _             -> error "Unsupported pattern in PMUnord assignment command")
+  _         -> error "Unsupported value in PMUnord assignment command")
+  where
+    f [] [] = do
+      -- check the condition
+      is_match <- eval c
+      -- run the next command if necessary
+      when is_match (run cs)
+
+    f (x:xs) (y:ys) = do
+      -- save current state of Handler
+      state <- get
+      -- identify the first pattern with the first value
+      is_match <- ident x y
+      -- continue the identification of remaining patterns
+      when is_match (saveAssignments *> f xs ys)
+      -- restore current state of Handler
+      put state
+      -- identify the list of patterns with the shifted values
+      f (x:xs) (ys ++ [y])
+
+    h [] pt ys = do
+      ident pt (List ys)
+      -- check the condition
+      is_match <- eval c
+      -- run the next command if necessary
+      when is_match (run cs)
+
+    h (x:xs) pt (y:ys) = do
+      -- save current state of Handler
+      state <- get
+      -- identify the first pattern with the first value
+      is_match <- ident x y
+      -- continue the identification of remaining patterns
+      when is_match (saveAssignments *> h xs pt ys)
+      -- restore current state of Handler
+      put state
+      -- identify the list of patterns with the shifted values
+      f (x:xs) pt (ys ++ [y])
+
+-- run ((Assign t p g c) : cs) = case t of
+--   PMSelect -> case p
+--     List
+--     List [e] -> f e
+--     List es  -> mapM_ f es
+--     _        -> eval g >>= \(LE es) -> mapM_ h es
+--     where
+--       f e = identC p e c >>= \jump -> when jump (run j)
+--       h e = identExprC p e c >>= \jump -> when jump (run j)
 --
 -- run (Branch c b j) = do
 --   s <- get             -- save current state of Handler

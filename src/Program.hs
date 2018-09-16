@@ -38,11 +38,11 @@ module Program
       Header(..),
       PTerminal(..),
       Program(..),
-      ProgStmt(..),
+      Command(..),
       Program.Base,
       Program.Vars,
       Programs,
-      PVExpr,
+      PExpr',
       PBool(..),
       PEntry(..),
       PExpr,
@@ -78,19 +78,18 @@ data PTerminal
   | AnySymbol       -- ^ '_' symbol means any argument
   | AnySequence     -- ^ '__' means any sequence of program expressions
   | PV [PTerm]      -- ^ any of subterm variants
-  | E PEntry
-  -- | Func Int PVExpr  -- ^ function call
-  | Frag [ProgStmt] -- ^ program fragment
+  -- | Func Int PExpr'  -- ^ function call
+  | Frag [Command] -- ^ program fragment
   | ExtVar Int      -- ^ variable name, used only in fragments
-  | IfElse PBool PVExpr PVExpr
-  | CaseOf PVExpr [(PVExpr, PVExpr)]
+  | IfElse PBool PExpr' PExpr'
+  | CaseOf PExpr' [(PExpr', PExpr')]
   | Fun Program
   deriving (Eq, Ord,Show)
 
 data PEntry
-  = Ptr Int PVExpr
-  | Ref Int PVExpr
-  | Inside PVExpr
+  = Ptr Int PExpr'
+  | Ref Int PExpr'
+  | Inside PExpr'
   deriving (Eq, Ord, Show)
 
 -- | Type of program term
@@ -100,14 +99,14 @@ data PBool
   = Const Bool          -- ^ Boolean constant (True or False)
   | Equal PTerm PTerm   -- ^ statement A eq B
   | NEqual PTerm PTerm  -- ^ statement A ne B
-  | In PTerm PVExpr     -- ^ statement A in B
+  | In PTerm PExpr'     -- ^ statement A in B
   | Not PBool           -- ^ statement not A
   | And [PBool]         -- ^ statement A and B
   | Or [PBool]          -- ^ statement A or B
   | BVar Int            -- ^ Boolean global variable
   deriving (Eq, Ord, Show)
 
-type PVExpr = Expr' PTerminal PEntry
+type PExpr' = Expr' PTerminal PEntry
 
 -- | Type of program expressions
 type PExpr = Expr PTerminal PEntry PBool
@@ -131,36 +130,38 @@ data Header = Header
   deriving (Eq, Ord,Show)
 
 -- | Type of program statement
-data ProgStmt
+data Command
+
   -- | Assigning instruction iterates terms with respect to a given condition
   --   and assigns them to a given program variable
   = Assign
     {
       pmtype    :: PMType, -- ^ type of pattern matching in assignment
-      pattern_  :: PVExpr,  -- ^ assigned pattern
-      generate  :: PVExpr,  -- ^ generator of list of terms
+      pattern_  :: PExpr',  -- ^ assigned pattern
+      generate  :: PExpr',  -- ^ generator of list of terms
       condition :: PBool   -- ^ condition for iterating of terms
     }
+
   -- | Branching instruction jumps to a given program fragment
   --   with respect to a given condition
   | Branch
     {
       condition :: PBool,   -- ^ condition for the branch
-      branch    :: [ProgStmt]  -- ^ branch to program fragment
+      branch    :: [Command]  -- ^ branch to program fragment
     }
 
   -- | Switching instruction jumps to a program fragment defined by a given expression
   | Switch
     {
-      expression :: PVExpr,              -- ^ expression
+      expression :: PExpr',              -- ^ expression
       condition  :: PBool,              -- ^ condition for switching
-      cases      :: [(PVExpr, PBool, [ProgStmt])]  -- ^ list of pairs (pattern, program fragment)
+      cases      :: [(PExpr', PBool, [Command])]  -- ^ list of pairs (pattern, program fragment)
     }
 
   -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
-      action    :: PVExpr,  -- ^ action
+      action    :: PExpr',  -- ^ action
       condition :: PBool   -- ^ condition of action
     }
 
@@ -170,7 +171,7 @@ data ProgStmt
   deriving(Eq,Ord,Show)
 
 -- | Type of program : header + command list
-data Program = Program Header [ProgStmt]
+data Program = Program Header [Command]
   | Empty
   deriving(Eq,Ord,Show)
 

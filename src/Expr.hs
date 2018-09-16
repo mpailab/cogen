@@ -30,7 +30,7 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
--- | Aggregate type of expression with a type of terminal symbols @a@ and type of entries @b@
+-- | Type of aggregate expression with a type of terminal symbols @a@ and type of entries @b@
 data Expr' a b
 
   -- Terminal expressions:
