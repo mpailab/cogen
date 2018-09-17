@@ -1,4 +1,4 @@
-{-# LANGUAGE ExistentialQuantification #-}
+c{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
@@ -336,10 +336,27 @@ type Handler = StateT Info
 -- | Run a list of commands
 run :: Monad m => [Command] -> Handler m LExpr
 
+-- Handle an assignment command of the form 'p <- g | c', where
+--  p is a program expression denoting a list of patterns in the assignment;
+--  g is a program expression denoting a list of values in the assignment;
+--  c is a program expression denoting a condition in the assignment.
+--
+-- The program expressions p, g, c are evaluated as follows:
+-- 'eval p' is a list of logical expressions in which some of leaves are program variables;
+-- 'eval g' is a list of logical expressions;
+-- 'eval c' is a logical constant true or false.
+--
+-- Note that we does not handle an assignment command of the form 'p = g | c', since it is equivalent to '[p] <- [g] | c'.
+--
+-- We handle a command 'p <- g | c' as follows. First, we eval p as a list of expressions [p1,...,pn] and g as a list of logical expressions [g1,...,gm], and reduce 'p <- g | c' to '[p1,...,pn] <- [g1,...,gm] | c'. If n is less than or equal to m, we try to handle '[p1,...,pn] <- [g1,...,gm] | c' in the following steps:
+-- 1. if n > 0, match p1 with g1 and handle '[p2,...,pn] <- [g2,...,gm] | c';
+-- 2. if n = 0, eval c;
+-- 3. handle '[p1,...,pn] <- [g2,...,gm] | c'.
+--
 run ((Assign PMSelect p g c) : cs) =
   eval p >>= \case
     (List ps) -> (eval g >>= \case
-      (List gs) -> when (length ps <= length gs) (f ps gs)
+      (List gs) -> f ps gs
       _         -> error "Unsupported value in PMSelect assignment command")
     _         -> error "Unsupported pattern in PMSelect assignment command"
   where
@@ -349,7 +366,7 @@ run ((Assign PMSelect p g c) : cs) =
       -- run the next command if necessary
       when is_match (run cs)
 
-    f (x:xs) (y:ys) = do
+    f (x:xs) (y:ys) = when (length ps <= length gs) do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the first value
@@ -361,50 +378,69 @@ run ((Assign PMSelect p g c) : cs) =
       -- identify the list of patterns with the tail of values
       f (x:xs) ys
 
+-- Handle an assignment command of the form 'p ~= g | c', where
+--  p is a program expression denoting a list of patterns in the assignment;
+--  g is a program expression denoting a list of values in the assignment;
+--  c is a program expression denoting a condition in the assignment.
+--
+-- The program expressions p, g, c are evaluated as follows:
+-- 'eval p' is a list of logical expressions in which some of leaves are program variables;
+-- 'eval g' is a list of logical expressions;
+-- 'eval c' is a logical constant true or false;
+--
+-- We handle a command 'p ~= g | c' as follows. First, we eval p as a list of expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and reduce 'p ~= g | c' to '[p1,...,pn] ~= [g1,...,gm] | c'. If n is less than or equal to m+1 and there is at most one pi = p@__, where __ is a program sequence-variable, we try to handle '[p1,...,pn] ~= [g1,...,gm] | c' in the following steps:
+-- 1. if 'p1 != p@__', match p1 with g1 and handle '[p2,...,pn] ~= [g2,...,gm] | c';
+-- 2. if 'p1 = p@__' and n > 1, match p2 with g1 and handle '[p1,p3,...,pn] ~= [g2,...,gm] | c';
+-- 3. if 'p1 = p@__' and n = 1, assing p the list [g1,...,gm] and eval c;
+-- 4. if n = 0, eval c;
+-- 5. handle '[p1,...,pn] ~= [g2,...,gm,g1] | c'.
+--
 run ((Assign PMUnord p g c) : cs) =
   eval g >>= \case
-  (List gs) -> (eval p >>= \case
-    (List ps)     -> when (length ps == length gs) (f ps gs)
-    (List_ ps pt) -> when (length ps <= length gs) (h ps pt gs)
-    _             -> error "Unsupported pattern in PMUnord assignment command")
-  _         -> error "Unsupported value in PMUnord assignment command")
+    (List ps) -> (eval g >>= \case
+      (List gs) -> when (length ps <= length gs + 1) (f ps gs (length gs))
+      _         -> error "Unsupported value in PMUnord assignment command")
+    _         -> error "Unsupported pattern in PMUnord assignment command"
   where
-    f [] [] = do
+    f [] [] 0 = do
       -- check the condition
       is_match <- eval c
       -- run the next command if necessary
       when is_match (run cs)
 
-    f (x:xs) (y:ys) = do
-      -- save current state of Handler
-      state <- get
-      -- identify the first pattern with the first value
-      is_match <- ident x y
-      -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> f xs ys)
-      -- restore current state of Handler
-      put state
-      -- identify the list of patterns with the shifted values
-      f (x:xs) (ys ++ [y])
+    f _ _ 0 = return
 
-    h [] pt ys = do
-      ident pt (List ys)
+    f [Ref i $ Aggr $ Sym AnySequence] ys n = do
+      -- assign a program variable with the number i the list ys
+      ident (Aggr $ Sym $ X i) (List ys)
       -- check the condition
       is_match <- eval c
       -- run the next command if necessary
       when is_match (run cs)
 
-    h (x:xs) pt (y:ys) = do
+    f (z@(Ref i $ Aggr $ Sym AnySequence):x:xs) (y:ys) n = do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the first value
       is_match <- ident x y
       -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> h xs pt ys)
+      when is_match (saveAssignments *> f (z:xs) ys (length ys))
       -- restore current state of Handler
       put state
       -- identify the list of patterns with the shifted values
-      f (x:xs) pt (ys ++ [y])
+      f (z:x:xs) (ys ++ [y]) (n-1)
+
+    f (x:xs) (y:ys) n = do
+      -- save current state of Handler
+      state <- get
+      -- identify the first pattern with the first value
+      is_match <- ident x y
+      -- continue the identification of remaining patterns
+      when is_match (saveAssignments *> f xs ys (length ys))
+      -- restore current state of Handler
+      put state
+      -- identify the list of patterns with the shifted values
+      f (x:xs) (ys ++ [y]) (n-1)
 
 -- run ((Assign t p g c) : cs) = case t of
 --   PMSelect -> case p
