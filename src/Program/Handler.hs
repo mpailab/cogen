@@ -337,9 +337,9 @@ type Handler = StateT Info
 run :: Monad m => [Command] -> Handler m LExpr
 
 -- Handle an assignment command of the form 'p <- g | c', where
---  p is a program expression denoting a list of patterns in the assignment;
---  g is a program expression denoting a list of values in the assignment;
---  c is a program expression denoting a condition in the assignment.
+--  p is a program expression denoting a list of patterns;
+--  g is a program expression denoting a list of values;
+--  c is a program expression denoting a condition.
 --
 -- The program expressions p, g, c are evaluated as follows:
 -- 'eval p' is a list of logical expressions in which some of leaves are program variables;
@@ -362,9 +362,9 @@ run ((Assign PMSelect p g c) : cs) =
   where
     f [] _ = do
       -- check the condition
-      is_match <- eval c
-      -- run the next command if necessary
-      when is_match (run cs)
+      Bool cond <- eval c
+      -- run the next commands if necessary
+      when cond (run cs)
 
     f (x:xs) (y:ys) = when (length ps <= length gs) do
       -- save current state of Handler
@@ -379,9 +379,9 @@ run ((Assign PMSelect p g c) : cs) =
       f (x:xs) ys
 
 -- Handle an assignment command of the form 'p ~= g | c', where
---  p is a program expression denoting a list of patterns in the assignment;
---  g is a program expression denoting a list of values in the assignment;
---  c is a program expression denoting a condition in the assignment.
+--  p is a program expression denoting a list of patterns;
+--  g is a program expression denoting a list of values;
+--  c is a program expression denoting a condition.
 --
 -- The program expressions p, g, c are evaluated as follows:
 -- 'eval p' is a list of logical expressions in which some of leaves are program variables;
@@ -396,7 +396,7 @@ run ((Assign PMSelect p g c) : cs) =
 -- 5. handle '[p1,...,pn] ~= [g2,...,gm,g1] | c'.
 --
 run ((Assign PMUnord p g c) : cs) =
-  eval g >>= \case
+  eval p >>= \case
     (List ps) -> (eval g >>= \case
       (List gs) -> when (length ps <= length gs + 1) (f ps gs (length gs))
       _         -> error "Unsupported value in PMUnord assignment command")
@@ -404,9 +404,9 @@ run ((Assign PMUnord p g c) : cs) =
   where
     f [] [] 0 = do
       -- check the condition
-      is_match <- eval c
-      -- run the next command if necessary
-      when is_match (run cs)
+      Bool cond <- eval c
+      -- run the next commands if necessary
+      when cond (run cs)
 
     f _ _ 0 = return
 
@@ -414,9 +414,9 @@ run ((Assign PMUnord p g c) : cs) =
       -- assign a program variable with the number i the list ys
       ident (Aggr $ Sym $ X i) (List ys)
       -- check the condition
-      is_match <- eval c
-      -- run the next command if necessary
-      when is_match (run cs)
+      Bool cond <- eval c
+      -- run the next commands if necessary
+      when cond (run cs)
 
     f (z@(Ref i $ Aggr $ Sym AnySequence):x:xs) (y:ys) n = do
       -- save current state of Handler
@@ -442,37 +442,72 @@ run ((Assign PMUnord p g c) : cs) =
       -- identify the list of patterns with the shifted values
       f (x:xs) (ys ++ [y]) (n-1)
 
--- run ((Assign t p g c) : cs) = case t of
---   PMSelect -> case p
---     List
---     List [e] -> f e
---     List es  -> mapM_ f es
---     _        -> eval g >>= \(LE es) -> mapM_ h es
---     where
---       f e = identC p e c >>= \jump -> when jump (run j)
---       h e = identExprC p e c >>= \jump -> when jump (run j)
+-- Handle an assignment command of the form 'p << g | c', where
+--  p is a program variable whose values are lists of logical expressions;
+--  g is a program expression denoting a list of values;
+--  c is a program expression denoting a condition.
 --
--- run (Branch c b j) = do
---   s <- get             -- save current state of Handler
---   BE cond <- eval c  -- evaluate the condition
---   when cond (run b)    -- run the branch program fragment if the condition holds
---   put s                -- restore current state of Handler
---   run j                -- run the next program fragment
+-- The program expressions p, g, c are evaluated as follows:
+-- if p is assigned, 'eval p' is a list of logical expressions;
+-- 'eval g' is a list of logical expressions;
+-- 'eval c' is a logical constant true or false;
 --
--- run (Switch g c cs j) = do
---   s <- get             -- save current state of Handler
---   runCase g c cs       -- handle a case corresponing to the expression and the condition
---   put s                -- restore current state of Handler
---   run j                -- run the next program fragment
+-- We handle a command 'p << g | c' as follows. First, we eval p as a list of logical expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and c as a logical constant C. If C is true, we assign p the new value [p1,...,pn,g1,...,gm].
 --
--- run (Action a c j) = do
---   BE cond <- eval c  -- run the condition
---   when cond (make a)   -- make the action if the condition holds
---   run j                -- run the next program fragment
---
--- run Empty = return ()
---
--- -- Run a case corresponing to a given expression
--- runCase :: Monad m => PTerm -> PTerm -> [(PTerm, Program)] -> Handler m ()
--- runCase e c [] = return ()
--- runCase e c ((p,b):s) = identC p e c >>= \x -> if x then run b else runCase e c s
+run ((Assign PMAppend p g c) : cs) = do
+  Bool cond <- eval c
+  when cond (isAssigned p >>= \case
+    True  -> liftM2 (++) (eval p) (eval g)
+    False -> assign p <$> (eval g))
+  run cs
+
+-- Handle a branch command of the form:
+-- if c
+-- do
+--   branch commands
+-- next commands
+run ((Branch c b) : cs) = do
+  state <- get         -- save current state of Handler
+  Bool cond <- eval c  -- evaluate the condition
+  when cond (run b)    -- run the branch commands if the condition holds
+  put state            -- restore current state of Handler
+  run cs               -- run the next commands
+
+-- Handle a switch command of the form:
+-- case e | c
+-- p1 | c1
+--   commands of the first case
+-- ...
+-- pn | cn
+--   commands of the lase case
+-- next commands
+run ((Switch e c i) : cs) = do
+  Bool cond <- eval c
+  if cond
+  then do
+    expr <- eval e
+    f i               -- handle a case corresponing to the expression
+  else
+    run cs            -- run the next commands
+  where
+    f [] = run cs
+    f ((ip,ic,ib):is) = do
+      -- save current state of Handler
+      state <- get
+      -- identify the first pattern with the logical expression
+      is_match <- ident ip expr
+      -- check the condition and run the commands of the first case
+      when is_match (saveAssignments *> eval ic >>= \(Bool cond) -> when cond (run ib))
+      -- restore current state of Handler
+      put state
+      -- run the next case
+      f is
+
+-- Handle an acting command
+run ((Action a c) : cs) = do
+  Bool cond <- eval c  -- run the condition
+  when cond (make a)   -- make the action if the condition holds
+  run cs                -- run the next commands
+
+-- Handle an empty command
+run Empty = return Expr.NONE
