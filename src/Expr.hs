@@ -30,24 +30,22 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
--- | Type of aggregate expression with a type of terminal symbols @a@ and type of entries @b@
-data Expr' a b
+-- | Type of aggregate expression with a type of terminal symbols @a@
+data Expr' a
 
   -- Terminal expressions:
-  = Sym a         -- ^ symbol
-  | Entr b        -- ^ entry
-  | Int Int       -- ^ integer
-  | Term (Term a) -- ^ term
+  = Term (Term LSymbol a) -- ^ term
 
   -- Composite expressions:
-  | Tuple [Expr' a b] -- ^ tuple of expressions
-  | List  [Expr' a b] -- ^ list of expressions
-  | Set   [Expr' a b] -- ^ set of expressions
+  | Alt   [Expr' a] -- ^ list of alternative expressions
+  | Tuple [Expr' a] -- ^ tuple of expressions
+  | List  [Expr' a] -- ^ list of expressions
+  | Set   [Expr' a] -- ^ set of expressions
   deriving (Eq, Ord, Show)
 
--- | Type of expressions with a type of terminal symbols @a@, type of entries @b@ and type of booleans $c$.
-data Expr a b c
-  = NONE             -- ^ undefined expression
-  | Bool c           -- ^ boolean expression
-  | Aggr (Expr' a b) -- ^ aggregate expression
+-- | Type of expressions with a type of terminal symbols @a@ and type of booleans $b$.
+data Expr a c
+  = NONE           -- ^ undefined expression
+  | Aggr (Expr' a) -- ^ aggregate expression
+  | Bool b         -- ^ boolean expression
   deriving (Eq, Ord, Show)

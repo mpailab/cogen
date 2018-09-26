@@ -72,7 +72,7 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-data PTerminal
+data PSymbol
   = X Int           -- ^ program variable
   | S LSymbol       -- ^ logic symbol
   | AnySymbol       -- ^ '_' symbol means any argument

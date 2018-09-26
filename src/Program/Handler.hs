@@ -112,50 +112,87 @@ type Handler = StateT Info
 -- saveAssignments = modify (\info -> info {assignments = M.union (buffer info)
 --                                                                    (assignments info),
 --                                              buffer = M.empty})
---
--- eval :: Monad m => PTerm -> Handler m LExpr
---
--- eval (X i) = getAssignment i >>= \case
---   Just x  -> return x
---   Nothing -> error "Evaluating error: a variable is not initialized\n"
---
--- eval (I i) = return (IE i)
---
--- eval (B c) = return (BE c)
---
--- eval (S x) = return (SE x)
---
--- eval (Program.Term x y) = do
---   SE s <- eval x
---   LE es <- eval y
---   return (TE (s :> map (\(TE t) -> t) es))
---
--- eval (List x) = LE <$> mapM eval x
---
--- eval (Tuple x) = LE <$> mapM eval x
---
--- eval (Not x) = BE . Prelude.not . bool <$> eval x
---
--- eval (And x) = BE <$> (mapM eval x >>= foldrM (\y -> return . (bool y &&)) True)
---
--- eval (Or x) = BE <$> (mapM eval x >>= foldrM (\y -> return . (bool y ||)) False)
---
--- eval (Equal x y) = BE <$> liftM2 (==) (eval x) (eval y)
---
--- eval (NEqual x y) = BE <$> liftM2 (/=) (eval x) (eval y)
---
--- eval (In x y) = do
---   xx <- eval x
---   LE yy <- eval y
---   return( BE (xx `elem` yy))
---
--- eval (Args x) = eval x >>= \case
---   (TE t) -> (return . LE . fmap TE . Term.args) t
---   (PE p) -> (return . LE . fmap getTermRef . zip [0..] . Term.args) t
---     where
---       TE t = expr p
---       getTermRef (i,x) = PE (IPtr (TE x) p (\(TE u) (TE v) -> TE (Term.change u i v)))
---
+
+eval :: Monad m => PExpr -> Handler m LExpr
+eval (Bool x) = Bool <$> evalB x
+eval (Aggr x) = Aggr <$> evalE x
+
+evalB :: Monad m => PBool -> Handler m Bool
+evalB (Const c) = return c
+evalB (Equal x y) = liftM2 (==) (evalT x) (evalT y)
+evalB (NEqual x y) = liftM2 (!=) (evalT x) (evalT y)
+evalB (In x y) = evalT x >>= \ex -> evalE y >>= \case
+  (Tuple ey) -> return (elem ex ey) -- tuples are handled as lists
+  (List  ey) -> return (elem ex ey)
+  (Set   ey) -> return (elem ex ey) -- sets are handled as lists
+  _          -> error "Evaluating error: a wrong in-expression\n"
+evalB (Not x) = Prelude.not <$> evalB x
+evalB (And xs) = mapM evalB xs >>= foldrM (\y -> return . (y &&)) True
+evalB (Or xs) = mapM evalB xs >>= foldrM (\y -> return . (y ||)) True
+evalB (BVar x) = getAssignment x >>= \case
+  Just y  -> return y
+  Nothing -> error "Evaluating error: a boolean variable is not initialized\n"
+
+evalE :: Monad m => PExpr' -> Handler m LExpr'
+evalE (Term (T x)) = (Term $ T) <$> evalT x
+evalE (Term (x :> xs)) = Term <$> (x :>) <$> mapM evalT xs
+evalE (Alt xs) = Alt <$> mapM evalE xs
+evalE (Tuple xs) = mapM evalE xs
+evalE (List xs) = mapM evalE xs
+evalE (Set xs) = mapM evalE xs
+
+evalT :: Monad m => PTerm -> Handler m LTerm
+evalT (T x) = evalS x
+evalT (x :> xs) = evalS x >>= \(T (LSym s)) -> (s :>) <$> (mapM evalT xs)
+
+evalS :: Monad m => PSymbol -> Handler m LTerm
+evalS (X x) = getAssignment x >>= \case
+  Just (Arrg (Term y))  -> return y
+  Nothing -> error "Evaluating error: a program variable is not initialized\n"
+evalS (S x) = return (T (LSym x))
+evalS (I x) = return (T (LSym (IL x)))
+
+eval (X i) = getAssignment i >>= \case
+  Just x  -> return x
+  Nothing -> error "Evaluating error: a variable is not initialized\n"
+
+eval (I i) = return (IE i)
+
+eval (B c) = return (BE c)
+
+eval (S x) = return (SE x)
+
+eval (Program.Term x y) = do
+  SE s <- eval x
+  LE es <- eval y
+  return (TE (s :> map (\(TE t) -> t) es))
+
+eval (List x) = LE <$> mapM eval x
+
+eval (Tuple x) = LE <$> mapM eval x
+
+eval (Not x) = BE . Prelude.not . bool <$> eval x
+
+eval (And x) = BE <$> (mapM eval x >>= foldrM (\y -> return . (bool y &&)) True)
+
+eval (Or x) = BE <$> (mapM eval x >>= foldrM (\y -> return . (bool y ||)) False)
+
+eval (Equal x y) = BE <$> liftM2 (==) (eval x) (eval y)
+
+eval (NEqual x y) = BE <$> liftM2 (/=) (eval x) (eval y)
+
+eval (In x y) = do
+  xx <- eval x
+  LE yy <- eval y
+  return( BE (xx `elem` yy))
+
+eval (Args x) = eval x >>= \case
+  (TE t) -> (return . LE . fmap TE . Term.args) t
+  (PE p) -> (return . LE . fmap getTermRef . zip [0..] . Term.args) t
+    where
+      TE t = expr p
+      getTermRef (i,x) = PE (IPtr (TE x) p (\(TE u) (TE v) -> TE (Term.change u i v)))
+
 -- replace :: Monad m => LExpr -> LExpr -> Handler m ()
 -- replace (PE (RPtr _ sw)) = sw
 -- replace (PE (IPtr _ par sw)) = let re = expr par in replace (PE par) . sw re
