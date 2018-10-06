@@ -42,6 +42,7 @@ handle p s = return s
 -- handle p s = let info = execState (run p) (Info s M.empty)
 --              in return (assignments info)
 
+
 data ExprPtr
 
   = RPtr
@@ -57,15 +58,23 @@ data ExprPtr
       iSwap   :: LExpr -> LExpr -> LExpr
     }
 
-instance Eq ExprPtr where
-  (==) _ _ = False
-  (/=) _ _ = True
+type LSwap = forall m . Monad m => LExpr -> Handler m ()
 
-data LTerminal
-  = LSym LSymbol
-  | LFun ([LExpr] -> LExpr)
+data LFun
+  = BFun [LExpr] Bool
+  | EFun [LExpr] LExpr
 
-type LExpr = Expr LSymbol ExprPtr Bool
+data LTExpr
+  = Sym LSymbol
+  | Ptr LExpr LSwap
+  | Fun LFun
+  deriving (Eq, Ord, Show)
+
+-- | Type of logical term
+type LTerm = Term LTExpr LTExpr
+
+-- | Type of logical expressions
+type LExpr = Expr LTExpr
 
 -- class Expression a where
 --   expr :: a -> LExpr
@@ -91,7 +100,8 @@ type LExpr = Expr LSymbol ExprPtr Bool
 data Info = Info
   {
     assignments :: M.Map Int LExpr,
-    buffer      :: M.Map Int LExpr
+    buffer      :: M.Map Int LExpr,
+    swap        :: LSwap
   }
 
 type Handler = StateT Info
@@ -113,15 +123,16 @@ type Handler = StateT Info
 --                                                                    (assignments info),
 --                                              buffer = M.empty})
 
-eval :: Monad m => PExpr -> Handler m LExpr
-eval (Bool x) = Bool <$> evalB x
-eval (Aggr x) = Aggr <$> evalE x
+-- eval :: Monad m => PExpr -> Handler m LExpr
+-- eval (Bool x) = Bool <$> evalB x
+-- eval (Aggr x) = Aggr <$> evalE x
 
 evalB :: Monad m => PBool -> Handler m Bool
 evalB (Const c) = return c
 evalB (Equal x y) = liftM2 (==) (evalT x) (evalT y)
 evalB (NEqual x y) = liftM2 (!=) (evalT x) (evalT y)
 evalB (In x y) = evalT x >>= \ex -> evalE y >>= \case
+  (Alt   ey) -> return (elem ex ey)
   (Tuple ey) -> return (elem ex ey) -- tuples are handled as lists
   (List  ey) -> return (elem ex ey)
   (Set   ey) -> return (elem ex ey) -- sets are handled as lists
@@ -133,24 +144,32 @@ evalB (BVar x) = getAssignment x >>= \case
   Just y  -> return y
   Nothing -> error "Evaluating error: a boolean variable is not initialized\n"
 
-evalE :: Monad m => PExpr' -> Handler m LExpr'
-evalE (Term (T x)) = (Term $ T) <$> evalT x
-evalE (Term (x :> xs)) = Term <$> (x :>) <$> mapM evalT xs
-evalE (Alt xs) = Alt <$> mapM evalE xs
-evalE (Tuple xs) = mapM evalE xs
-evalE (List xs) = mapM evalE xs
-evalE (Set xs) = mapM evalE xs
+evalE :: Monad m => PExpr -> Handler m LExpr
+evalE (Term (T x)) = (Term . f) <$> evalT x
+evalE (Term (x :> xs)) = Term <$> (x :>) <$> mapM (f <$> evalT) xs
+evalE (Alt xs)   = Alt   <$> mapM evalE xs
+evalE (Tuple xs) = Tuple <$> mapM evalE xs
+evalE (List xs)  = List  <$> mapM evalE xs
+evalE (Set xs)   = Set   <$> mapM evalE xs
+where
+  f :: LTerm -> (Term LSymbol LTExpr)
+  f (T y) = T y
+  f ((Sym y) :> ys) = y :> (map f ys)
+  f y = T y
 
 evalT :: Monad m => PTerm -> Handler m LTerm
-evalT (T x) = evalS x
-evalT (x :> xs) = evalS x >>= \(T (LSym s)) -> (s :>) <$> (mapM evalT xs)
+evalT (T x) = evalTE x
+evalT (x :> xs) = evalTE x >>= \case
+  (T (Sym s)) -> (s :>) <$> (mapM evalT xs)
+  _ -> error "Evaluating error: a term header is not a logical symbol\n"
 
-evalS :: Monad m => PSymbol -> Handler m LTerm
-evalS (X x) = getAssignment x >>= \case
-  Just (Arrg (Term y))  -> return y
+evalTE :: Monad m => PTExpr -> Handler m LTerm
+evalTE (Var x) = getAssignment x >>= \case
+  Just y  -> return y
   Nothing -> error "Evaluating error: a program variable is not initialized\n"
-evalS (S x) = return (T (LSym x))
-evalS (I x) = return (T (LSym (IL x)))
+evalTE (Ptr x e) =
+evalTE (S x) = return (T (LSym x))
+evalTE (I x) = return (T (LSym (IL x)))
 
 eval (X i) = getAssignment i >>= \case
   Just x  -> return x
@@ -369,6 +388,39 @@ eval (Args x) = eval x >>= \case
 --   unless is_match (put state) -- restore current state of Handler if necessary
 --   return is_match
 
+class Ident a b where
+  ident :: (Expr a) -> (Expr b) -> Handler m Bool
+  ident (Term (x :> xs)) (Term (y :> ys)) = if x == y then f xs ys else return False
+  ident (Any xs) y = g (\x -> ident x y) xs
+  ident x (Any ys) = g (ident x) ys
+  ident (Tuple xs) (Tuple ys) = f xs ys
+  ident (List xs) (List ys) = f xs ys
+  ident (Set xs) (Set ys) = f xs ys
+  where
+    f xs ys = zipWithM ident xs ys >>= foldrM (\z -> return . (z &&)) True
+    g x ys  = mapM x ys >>= foldrM (\z -> return . (z ||)) False
+
+instance Ident PTExpr b where
+  ident (Term (T (Var i))) y = getAssignment i >>= \case
+    Just x  -> ident x y
+    Nothing -> eval y >>= setAssignment i >> return True
+  ident (Term (T (Ptr i x))) y = ident x y >>= \case
+    True  -> eval y >>= \e -> getSwap >>= \sw -> setAssignment i (Ptr e sw) >> return True
+    False -> return False
+  ident (Term (T (Ref i x))) y = ident x y >>= \case
+    True  -> eval y >>= setAssignment i >> return True
+    False -> return False
+  ident (Term (T (Sym x))) y = eval y >>= \case
+    (Term (T (Sym s))) -> return (x == s)
+    otherwise          -> return False
+  ident (Term (T (Fun x p))) y = error "Error: a function call is not supported"
+  ident (Term (T (IfElse c te fe))) y = error "Error: a conditional expression is not supported"
+  ident (Term (T (CaseOf e cs))) y = error "Error: a switching expression is not supported"
+
+instance Ident PTExpr PTExpr where
+  ident x (Term (T (Var i))) = getAssignment i >>= \case
+    Just y  -> setSwap (swapAssignment i) >> ident x y
+    Nothing -> error "Error: a program variable is not initialized\n"
 
 -- | Run a list of commands
 run :: Monad m => [Command] -> Handler m LExpr
@@ -390,16 +442,19 @@ run :: Monad m => [Command] -> Handler m LExpr
 -- 2. if n = 0, eval c;
 -- 3. handle '[p1,...,pn] <- [g2,...,gm] | c'.
 --
-run ((Assign PMSelect p g c) : cs) =
-  eval p >>= \case
-    (List ps) -> (eval g >>= \case
-      (List gs) -> f ps gs
-      _         -> error "Unsupported value in PMSelect assignment command")
-    _         -> error "Unsupported pattern in PMSelect assignment command"
+run ((Assign Select p g c) : cs) =
+  case p of
+    List ps -> case g of
+      List gs   -> f ps gs
+      otherwise -> eval g >>= \case
+        (List gs) -> f ps gs
+        _         -> error "Unsupported value in a Select-assignment command\n"
+    otherwise -> error "Unsupported pattern in a Select-assignment command\n"
   where
+    f :: [PExpr] -> [Expr a] -> Handler m LExpr
     f [] _ = do
       -- check the condition
-      Bool cond <- eval c
+      cond <- evalB c
       -- run the next commands if necessary
       when cond (run cs)
 

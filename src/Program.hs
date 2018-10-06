@@ -36,18 +36,16 @@ module Program
       newPVars,
       NameSpace,
       Header(..),
-      PTerminal(..),
       Program(..),
       Command(..),
       Program.Base,
       Program.Vars,
       Programs,
-      PExpr',
+      PAssign(..),
       PBool(..),
-      PEntry(..),
       PExpr,
-      PMType(..),
-      PTerm(..),
+      PTerm,
+      PTExpr(..),
       PVars,
       setPrograms,
       setPVars
@@ -72,60 +70,53 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-data PSymbol
-  = X Int           -- ^ program variable
-  | S LSymbol       -- ^ logic symbol
-  | AnySymbol       -- ^ '_' symbol means any argument
-  | AnySequence     -- ^ '__' means any sequence of program expressions
-  | PV [PTerm]      -- ^ any of subterm variants
-  -- | Func Int PExpr'  -- ^ function call
-  | Frag [Command] -- ^ program fragment
-  | ExtVar Int      -- ^ variable name, used only in fragments
-  | IfElse PBool PExpr' PExpr'
-  | CaseOf PExpr' [(PExpr', PExpr')]
-  | Fun Program
-  deriving (Eq, Ord,Show)
+-- | Type of program variable
+type PVar = Int
 
-data PEntry
-  = Ptr Int PExpr'
-  | Ref Int PExpr'
-  | Inside PExpr'
+-- | Type of program terminals, e.i., terminal expressions
+data PTExpr
+  = Var PVar                       -- ^ program variable
+  | Ptr PVar PExpr                 -- ^ pointer to expression
+  | Ref PVar PExpr                 -- ^ reference to expression
+  | Sym LSymbol                   -- ^ logic symbol
+  | Fun LSymbol [PExpr]           -- ^ function call
+  | IfElse PBool PExpr PExpr      -- ^ conditional expression
+  | CaseOf PExpr [(PExpr, PExpr)] -- ^ switching expression
   deriving (Eq, Ord, Show)
 
 -- | Type of program term
-type PTerm = Term PTerminal
+type PTerm = Term PTExpr PTExpr
+
+-- | Type of program expressions
+type PExpr = Expr PTExpr
 
 data PBool
   = Const Bool          -- ^ Boolean constant (True or False)
   | Equal PTerm PTerm   -- ^ statement A eq B
   | NEqual PTerm PTerm  -- ^ statement A ne B
-  | In PTerm PExpr'     -- ^ statement A in B
+  | In PTerm PExpr      -- ^ statement A in B
   | Not PBool           -- ^ statement not A
   | And [PBool]         -- ^ statement A and B
   | Or [PBool]          -- ^ statement A or B
   | BVar Int            -- ^ Boolean global variable
   deriving (Eq, Ord, Show)
 
-type PExpr' = Expr' PTerminal PEntry
-
--- | Type of program expressions
-type PExpr = Expr PTerminal PEntry PBool
-
 -- | type of assignment statement
-data PMType = PMSelect -- ^ match patterns with list elements (l1,...,lN <- right)
-            | PMUnord  -- ^ match list pattern with list of elements in any order (left ~= right)
-            | PMAppend -- ^ appends right part to variable (left << right)
-            deriving (Eq, Ord)
+data PAssign
+  = Select -- ^ match patterns with list elements (l1,...,lN <- right)
+  | Unord  -- ^ match list pattern with list of elements in any order (left ~= right)
+  | Append -- ^ appends right part to variable (left << right)
+  deriving (Eq, Ord)
 
-instance Show PMType where
-  show PMAppend = " << "
-  show PMUnord = " ~= "
-  show PMSelect = " <- "
+instance Show PAssign where
+  show Select = " <- "
+  show Unord  = " ~= "
+  show Append = " << "
 
 data Header = Header
   {
-    name      :: String,
-    arguments :: [PTerminal]
+    name      :: LSymbol,
+    arguments :: [PVar]
   }
   deriving (Eq, Ord,Show)
 
@@ -136,10 +127,10 @@ data Command
   --   and assigns them to a given program variable
   = Assign
     {
-      pmtype    :: PMType, -- ^ type of pattern matching in assignment
-      pattern_  :: PExpr',  -- ^ assigned pattern
-      generate  :: PExpr',  -- ^ generator of list of terms
-      condition :: PBool   -- ^ condition for iterating of terms
+      assign    :: PAssign, -- ^ type of pattern matching in assignment
+      pattern_  :: PExpr,   -- ^ assigned pattern
+      generate  :: PExpr,   -- ^ generator of list of terms
+      condition :: PBool    -- ^ condition for iterating of terms
     }
 
   -- | Branching instruction jumps to a given program fragment
@@ -153,27 +144,28 @@ data Command
   -- | Switching instruction jumps to a program fragment defined by a given expression
   | Switch
     {
-      expression :: PExpr',              -- ^ expression
+      expression :: PExpr,              -- ^ expression
       condition  :: PBool,              -- ^ condition for switching
-      cases      :: [(PExpr', PBool, [Command])]  -- ^ list of pairs (pattern, program fragment)
+      cases      :: [(PExpr, PBool, [Command])] -- ^ list of cases (p,c,f), where
+                                                -- p is a pattern of the case
+                                                -- c is a condition of the case
+                                                -- f is a list of commands of the case
     }
 
   -- | Acting instruction performs a given action with respect to a given condition
   | Action
     {
-      action    :: PExpr',  -- ^ action
+      action    :: PExpr,  -- ^ action
       condition :: PBool   -- ^ condition of action
     }
 
-  -- | program fragment variable with delayed substitution
-  | DelayedFrag PTerm
-
-  deriving(Eq,Ord,Show)
+  deriving (Eq,Ord,Show)
 
 -- | Type of program : header + command list
-data Program = Program Header [Command]
+data Program
+  = Program Header [Command]
   | Empty
-  deriving(Eq,Ord,Show)
+  deriving (Eq,Ord,Show)
 
 -- | Type of programs database
 type Programs = M.Map LSymbol Program

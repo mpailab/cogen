@@ -8,17 +8,14 @@ Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
 
-Expressions are built up from terminal expressions using brackets, braces, commas, etc. Terminal expressions are either terminal symbols (logical symbol, program variables, function's calls, etc.), entries (pointers, referenses, etc.) or booleans (logical constants, boolean expressions, etc.).
+Expressions are built up from terminal expressions using brackets, braces, commas, alternating, logical terms etc. Terminal expressions are defined outside. As an example, terminal expressions are logical symbols, program variables, function's calls, pointers, referenses.
 
 There are two classes of expressions: logical and program. Logical expressions represent logical terms that are elements of inner language of the system. Program expressions represent program terms that are elements of outer language of the system. The type @Expr@ is used for denoting common parts of logical and program expressions.
-
-The type @Expr'@ denotes the common type of expressions without detalization of the types of their values. In order to reduce error detection to parsing-level, a class of expressions with the same type of values can be isolated as a particular type of expressions. As an example, the type of boolean expressions is a particular type of expressions, since using a boolean expression in composite context does not supported.
 -}
 module Expr
     (
       -- exports
-      Expr(..),
-      Expr'(..)
+      Expr(..)
     )
 where
 
@@ -26,26 +23,20 @@ where
 
 -- Internal imports
 import           Term
+import LSymbol
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
--- | Type of aggregate expression with a type of terminal symbols @a@
-data Expr' a
+-- | Type of expression with a type of terminal expressions @a@
+data Expr a
 
   -- Terminal expressions:
-  = Term (Term LSymbol a) -- ^ term
+  = Term (Term LSymbol a) -- ^ logical term over terminal expressions
 
   -- Composite expressions:
-  | Alt   [Expr' a] -- ^ list of alternative expressions
-  | Tuple [Expr' a] -- ^ tuple of expressions
-  | List  [Expr' a] -- ^ list of expressions
-  | Set   [Expr' a] -- ^ set of expressions
-  deriving (Eq, Ord, Show)
-
--- | Type of expressions with a type of terminal symbols @a@ and type of booleans $b$.
-data Expr a c
-  = NONE           -- ^ undefined expression
-  | Aggr (Expr' a) -- ^ aggregate expression
-  | Bool b         -- ^ boolean expression
+  | Alt   [Expr a] -- ^ list of alternative expressions
+  | Tuple [Expr a] -- ^ tuple of expressions
+  | List  [Expr a] -- ^ list of expressions
+  | Set   [Expr a] -- ^ set of expressions
   deriving (Eq, Ord, Show)
