@@ -64,8 +64,8 @@ import           Text.Regex.Posix
 -- Internal imports
 import           Expr
 import           LSymbol
-import           Utils
 import           Term
+import           Utils
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -73,22 +73,21 @@ import           Term
 -- | Type of program variable
 type PVar = Int
 
--- | Type of program terminals, e.i., terminal expressions
-data PTExpr
-  = Var PVar                       -- ^ program variable
-  | Ptr PVar PExpr                 -- ^ pointer to expression
-  | Ref PVar PExpr                 -- ^ reference to expression
-  | Sym LSymbol                   -- ^ logic symbol
+-- | Type of program entries in terminal expressions
+data PEntry
+  = Var PVar                      -- ^ program variable
+  | Ptr PVar PExpr                -- ^ pointer to expression
+  | Ref PVar PExpr                -- ^ reference to expression
   | Fun LSymbol [PExpr]           -- ^ function call
   | IfElse PBool PExpr PExpr      -- ^ conditional expression
   | CaseOf PExpr [(PExpr, PExpr)] -- ^ switching expression
   deriving (Eq, Ord, Show)
 
 -- | Type of program term
-type PTerm = Term PTExpr PTExpr
+type PTExpr = TExpr PEntry
 
 -- | Type of program expressions
-type PExpr = Expr PTExpr
+type PExpr = Expr PEntry
 
 data PBool
   = Const Bool          -- ^ Boolean constant (True or False)

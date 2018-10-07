@@ -64,17 +64,16 @@ data LFun
   = BFun [LExpr] Bool
   | EFun [LExpr] LExpr
 
-data LTExpr
-  = Sym LSymbol
-  | Ptr LExpr LSwap
+data LEntry
+  = Ptr LExpr LSwap
   | Fun LFun
   deriving (Eq, Ord, Show)
 
 -- | Type of logical term
-type LTerm = Term LTExpr LTExpr
+type LTExpr = TExpr LEntry
 
 -- | Type of logical expressions
-type LExpr = Expr LTExpr
+type LExpr = Expr LEntry
 
 -- class Expression a where
 --   expr :: a -> LExpr
@@ -413,9 +412,14 @@ instance Ident PTExpr b where
   ident (Term (T (Sym x))) y = eval y >>= \case
     (Term (T (Sym s))) -> return (x == s)
     otherwise          -> return False
-  ident (Term (T (Fun x p))) y = error "Error: a function call is not supported"
-  ident (Term (T (IfElse c te fe))) y = error "Error: a conditional expression is not supported"
-  ident (Term (T (CaseOf e cs))) y = error "Error: a switching expression is not supported"
+  ident (Term (T (Fun name args))) y = error "Error: a function call is not supported"
+  ident (Term (T (IfElse c te fe))) y = eval c >>= \case
+    True  -> ident te y
+    False -> ident fe y
+  ident (Term (T (CaseOf e []))) y = return False
+  ident (Term (T (CaseOf e ((pe,ce):cs)))) y = ident e pe >>= \case
+    True  -> ident ce y
+    False -> ident (Term (T (CaseOf e cs))) y
 
 instance Ident PTExpr PTExpr where
   ident x (Term (T (Var i))) = getAssignment i >>= \case

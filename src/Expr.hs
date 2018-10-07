@@ -22,20 +22,27 @@ where
 -- External imports
 
 -- Internal imports
+import           LSymbol
 import           Term
-import LSymbol
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
+
+data Terminal a
+  = Any
+  | Alt [TExpr a]
+  | Ent a
+  | Sym LSymbol
+
+type TExpr a = Term (Terminal a)
 
 -- | Type of expression with a type of terminal expressions @a@
 data Expr a
 
   -- Terminal expressions:
-  = Term (Term LSymbol a) -- ^ logical term over terminal expressions
+  = Term (TExpr a) -- ^ logical term over terminal expressions
 
   -- Composite expressions:
-  | Alt   [Expr a] -- ^ list of alternative expressions
   | Tuple [Expr a] -- ^ tuple of expressions
   | List  [Expr a] -- ^ list of expressions
   | Set   [Expr a] -- ^ set of expressions
