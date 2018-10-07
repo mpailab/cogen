@@ -35,75 +35,29 @@ import Expr
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-type Args = M.Map Int LExpr
+type Args = M.Map Var Expr
 
-handle :: Monad m => Program -> Args -> m Args
-handle p s = return s
--- handle p s = let info = execState (run p) (Info s M.empty)
---              in return (assignments info)
+class Function a where
+  apply :: (Args -> Expr) -> [(Var,Expr)] -> [Var] -> a
 
+instance Function Expr where
+  apply f args [] = f (M.fromList args)
 
-data ExprPtr
+instance Function a => Function (Expr -> a) where
+  apply f args (x:xs) a = apply f ((x,a):args) xs
 
-  = RPtr
-    {
-      getExpr :: LExpr,
-      rSwap   :: forall m . Monad m => LExpr -> Handler m ()
-    }
-
-  | IPtr
-    {
-      getExpr :: LExpr,
-      up      :: ExprPtr,
-      iSwap   :: LExpr -> LExpr -> LExpr
-    }
-
-type LSwap = forall m . Monad m => LExpr -> Handler m ()
-
-data LFun
-  = BFun [LExpr] Bool
-  | EFun [LExpr] LExpr
-
-data LEntry
-  = Ptr LExpr LSwap
-  | Fun LFun
-  deriving (Eq, Ord, Show)
-
--- | Type of logical term
-type LTExpr = TExpr LEntry
-
--- | Type of logical expressions
-type LExpr = Expr LEntry
-
--- class Expression a where
---   expr :: a -> LExpr
---   bool :: a -> Bool
---   int  :: a -> Int
---
--- instance Expression LExpr where
---
---   expr (PE x) = expr x
---   expr x      = x
---
---   bool (BE x) = x
---   bool _      = error "Non-Boolean expression"
---
---   int (IE x) = x
---   int _      = error "Non-integer expression"
---
--- instance Expression ExprPtr where
---   expr = getExpr
---   bool = bool . expr
---   int = int . expr
+handle :: (Monad m, Function a) => Program -> m a
+handle (Program (Header name args) cs) =
+  let f = execState (run cs) (Info (M.fromList $ zip args args) M.empty)
+  in return (apply f [] args)
 
 data Info = Info
   {
-    assignments :: M.Map Int LExpr,
-    buffer      :: M.Map Int LExpr,
-    swap        :: LSwap
+    vars :: M.Map Var Var
+    vals :: M.Map Var (Args -> Expr)
   }
 
-type Handler = StateT Info
+type Handler m a = StateT Info m (Args -> a)
 
 ------------------------------------------------------------------------------------------
 -- -- Functions
@@ -124,65 +78,72 @@ type Handler = StateT Info
 
 eval :: Monad m => Expr -> Handler m Expr
 
-eval (Var i) = getAssignment i >>= \case
-  Just x  -> return x
-  Nothing -> error "Evaluating error: a program variable is not initialized.\n"
+eval (Var i) = return (\args -> args ! i)
 
 eval (Ptr _ _) = error "Evaluating error: can't take a pointer in the evaluating mode. Try take a reference x@(...).\n"
 
-eval (Ref i e) = eval e >>= \x -> setAssignment i >> return x
+eval (Ref i e) = eval e >>= \f -> setVal i f >> return f
 
-eval x@(Sym _) = return x
+eval x@(Sym _) = return (\args -> x)
 
-eval x@(Int _) = return x
+eval x@(Int _) = return (\args -> x)
 
 eval Any = error "Evaluating error: can't evaluate any expression.\n"
 
 eval AnySeq = error "Evaluating error: can't evaluate any sequence of expressions.\n"
 
-eval x@(Const _) = return x
+eval x@(Bool _) = return (\args -> x)
 
-eval (Equal x y) = Const <$> liftM2 (==) (eval x) (eval y)
+eval (Equal x y) = eval x >>= \f -> eval y >>= \g ->
+  return (\args -> Bool $ (f args) == (g args))
 
-eval (NEqual x y) = Const <$> liftM2 (!=) (eval x) (eval y)
+eval (NEqual x y) = eval x >>= \f -> eval y >>= \g ->
+  return (\args -> Bool $ (f args) != (g args))
 
-eval (In x y) = eval x >>= \ex -> eval y >>= \case
-  (Alt   ey) -> return (elem ex ey)
-  (Tuple ey) -> return (elem ex ey) -- tuples are handled as lists
-  (List  ey) -> return (elem ex ey)
-  (Set   ey) -> return (elem ex ey) -- sets are handled as lists
-  _          -> error "Evaluating error: a wrong in-expression.\n"
+eval (In x y) = eval x >>= \f -> eval y >>= \g ->
+  return (\args ->
+    let ex = f args
+    in case (g args) of
+      (Alt   ey) -> Bool (elem ex ey)
+      (Tuple ey) -> Bool (elem ex ey) -- tuples are handled as lists
+      (List  ey) -> Bool (elem ex ey)
+      (Set   ey) -> Bool (elem ex ey) -- sets are handled as lists
+      _          -> error "Evaluating error: a wrong in-expression.\n")
 
-eval (Not x) = Bool <$> Prelude.not <$> (evalB x)
+eval (Not x) = evalB x >>= \f ->
+  return (\args -> Bool $ Prelude.not (f args))
 
-eval (And xs) = Bool <$> (foldrM (\y -> return . (y &&)) True) <$> mapM evalB xs
+eval (And xs) = map evalB xs >>= \f ->
+  return (\args -> Bool $ foldrM (\y -> return . (y &&)) True (f args))
 
-eval (Or xs) = Bool <$> (foldrM (\y -> return . (y ||)) False) <$> mapM evalB xs
+eval (Or xs) = map evalB xs >>= \f ->
+  return (\args -> Bool $ foldrM (\y -> return . (y ||)) False (f args))
 
-eval (IfElse c t f) = evalB c >>= \case
-  True  -> eval t
-  False -> eval f
+eval (IfElse c x y) = evalB c >>= \f -> eval x >>= \g -> eval y >>= \h ->
+  return (\args -> if f args then g args else h args)
 
 eval (CaseOf e []) = error "Evaluating error: can't evaluate an empty case-expression.\n"
-eval (CaseOf e ((p,c):cs)) = ident e p >>= \case
-  True  -> eval c
-  False -> eval (CaseOf e cs)
+eval (CaseOf e ((p,c):cs)) =
+  ident e p >>= \f -> eval c >>= \g -> eval (CaseOf e cs) >>= \h ->
+  return (\args -> if f args then g args else h args)
 
-eval (Term (T x)) = Term <$> T <$> eval x
-eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x) (mapM eval xs)
+eval (Term (T x)) = eval x >>= \f -> return (\arg -> Term $ T (f args))
+eval (Term (x :> xs)) = eval x >>= \f -> mapM eval xs >>= \g ->
+  return (\args -> Term $ (f args) :> (g args))
 
-eval (Alt xs)   = Alt   <$> mapM eval xs
+eval (Alt xs)   = mapM eval xs >>= \f -> return (\args -> Alt (f args))
 
-eval (Tuple xs) = Tuple <$> mapM eval xs
+eval (Tuple xs) = mapM eval xs >>= \f -> return (\args -> Tuple (f args))
 
-eval (List xs)  = List  <$> mapM eval xs
+eval (List xs)  = mapM eval xs >>= \f -> return (\args -> List (f args))
 
-eval (Set xs)   = Set   <$> mapM eval xs
+eval (Set xs)   = mapM eval xs >>= \f -> return (\args -> Set (f args))
 
 evalB :: Monad m => Expr -> Handler m Bool
-evalB e = eval e >>= \case
-  Bool c -> return c
-  _      -> error "Evaluating error: a wrong Boolean expression.\n"
+evalB e = eval e >>= \f ->
+  return (\args -> case f args of
+    Bool c -> c
+    _      -> error "Evaluating error: a wrong Boolean expression.\n")
 
 ident :: Monad m => Expr -> Expr -> Handler m Bool
 

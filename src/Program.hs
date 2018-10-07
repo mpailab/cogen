@@ -80,8 +80,8 @@ instance Show PAssign where
 
 data Header = Header
   {
-    name      :: LSymbol,
-    arguments :: [PVar]
+    name :: LSymbol,
+    args :: [Var]
   }
   deriving (Eq, Ord,Show)
 
