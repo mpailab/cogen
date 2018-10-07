@@ -15,7 +15,10 @@ There are two classes of expressions: logical and program. Logical expressions r
 module Expr
     (
       -- exports
-      Expr(..)
+      Expr(..),
+      FExpr,
+      SExpr,
+      TExpr
     )
 where
 
@@ -28,22 +31,52 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-data Terminal a
-  = Any
-  | Alt [TExpr a]
-  | Ent a
-  | Sym LSymbol
-
-type TExpr a = Term (Terminal a)
+type FExpr = forall m . Monad m => [Expr] -> m Expr
+type SExpr = forall m . Monad m => Expr -> m ()
+type TExpr = Term Expr
 
 -- | Type of expression with a type of terminal expressions @a@
-data Expr a
+data Expr
 
-  -- Terminal expressions:
-  = Term (TExpr a) -- ^ logical term over terminal expressions
+  -- Simple expressions:
+  = Var Int        -- ^ program variable
+  | Ptr Int Expr   -- ^ pointer to expression
+  | Ref Int Expr   -- ^ reference to expression
+
+  -- Constant expressions:
+  | Sym LSymbol    -- ^ logical symbol
+  | Int Int        -- ^ integer
+  | Any            -- ^ any expression
+  | AnySeq         -- ^ any sequence of expressions
+
+    -- Boolean expressions:
+  | Bool Bool         -- ^ Boolean constant (True or False)
+  | Equal Expr Expr   -- ^ statement A eq B
+  | NEqual Expr Expr  -- ^ statement A ne B
+  | In Expr Expr      -- ^ statement A in B
+  | Not Expr          -- ^ statement not A
+  | And [Expr]        -- ^ statement A and B
+  | Or [Expr]         -- ^ statement A or B
+
+  -- Conditional expressions:
+  | IfElse Expr Expr Expr      -- ^ conditional expression
+  | CaseOf Expr [(Expr, Expr)] -- ^ switching expression
 
   -- Composite expressions:
-  | Tuple [Expr a] -- ^ tuple of expressions
-  | List  [Expr a] -- ^ list of expressions
-  | Set   [Expr a] -- ^ set of expressions
+  | Term  TExpr                -- ^ term over expressions
+  | Alt   [Expr]               -- ^ alternating of expressions
+  | Tuple [Expr]               -- ^ tuple of expressions
+  | List  [Expr]               -- ^ list of expressions
+  | Set   [Expr]               -- ^ set of expressions
+
+  -- Functional expressions:
+  | Call LSymbol [Expr]  -- ^ partial function call
+  | Fun  FExpr           -- ^ function over expressions
+
+  -- Overloaded expressions:
+  | Swap Expr SExpr  -- ^ expression together with a swap-function
+
+  -- Undefined expression:
+  | NONE
+
   deriving (Eq, Ord, Show)

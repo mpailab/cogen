@@ -122,309 +122,166 @@ type Handler = StateT Info
 --                                                                    (assignments info),
 --                                              buffer = M.empty})
 
--- eval :: Monad m => PExpr -> Handler m LExpr
--- eval (Bool x) = Bool <$> evalB x
--- eval (Aggr x) = Aggr <$> evalE x
+eval :: Monad m => Expr -> Handler m Expr
 
-evalB :: Monad m => PBool -> Handler m Bool
-evalB (Const c) = return c
-evalB (Equal x y) = liftM2 (==) (evalT x) (evalT y)
-evalB (NEqual x y) = liftM2 (!=) (evalT x) (evalT y)
-evalB (In x y) = evalT x >>= \ex -> evalE y >>= \case
+eval (Var i) = getAssignment i >>= \case
+  Just x  -> return x
+  Nothing -> error "Evaluating error: a program variable is not initialized.\n"
+
+eval (Ptr _ _) = error "Evaluating error: can't take a pointer in the evaluating mode. Try take a reference x@(...).\n"
+
+eval (Ref i e) = eval e >>= \x -> setAssignment i >> return x
+
+eval x@(Sym _) = return x
+
+eval x@(Int _) = return x
+
+eval Any = error "Evaluating error: can't evaluate any expression.\n"
+
+eval AnySeq = error "Evaluating error: can't evaluate any sequence of expressions.\n"
+
+eval x@(Const _) = return x
+
+eval (Equal x y) = Const <$> liftM2 (==) (eval x) (eval y)
+
+eval (NEqual x y) = Const <$> liftM2 (!=) (eval x) (eval y)
+
+eval (In x y) = eval x >>= \ex -> eval y >>= \case
   (Alt   ey) -> return (elem ex ey)
   (Tuple ey) -> return (elem ex ey) -- tuples are handled as lists
   (List  ey) -> return (elem ex ey)
   (Set   ey) -> return (elem ex ey) -- sets are handled as lists
-  _          -> error "Evaluating error: a wrong in-expression\n"
-evalB (Not x) = Prelude.not <$> evalB x
-evalB (And xs) = mapM evalB xs >>= foldrM (\y -> return . (y &&)) True
-evalB (Or xs) = mapM evalB xs >>= foldrM (\y -> return . (y ||)) True
-evalB (BVar x) = getAssignment x >>= \case
-  Just y  -> return y
-  Nothing -> error "Evaluating error: a boolean variable is not initialized\n"
+  _          -> error "Evaluating error: a wrong in-expression.\n"
 
-evalE :: Monad m => PExpr -> Handler m LExpr
-evalE (Term (T x)) = (Term . f) <$> evalT x
-evalE (Term (x :> xs)) = Term <$> (x :>) <$> mapM (f <$> evalT) xs
-evalE (Alt xs)   = Alt   <$> mapM evalE xs
-evalE (Tuple xs) = Tuple <$> mapM evalE xs
-evalE (List xs)  = List  <$> mapM evalE xs
-evalE (Set xs)   = Set   <$> mapM evalE xs
+eval (Not x) = Bool <$> Prelude.not <$> (evalB x)
+
+eval (And xs) = Bool <$> (foldrM (\y -> return . (y &&)) True) <$> mapM evalB xs
+
+eval (Or xs) = Bool <$> (foldrM (\y -> return . (y ||)) False) <$> mapM evalB xs
+
+eval (IfElse c t f) = evalB c >>= \case
+  True  -> eval t
+  False -> eval f
+
+eval (CaseOf e []) = error "Evaluating error: can't evaluate an empty case-expression.\n"
+eval (CaseOf e ((p,c):cs)) = ident e p >>= \case
+  True  -> eval c
+  False -> eval (CaseOf e cs)
+
+eval (Term (T x)) = Term <$> T <$> eval x
+eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x) (mapM eval xs)
+
+eval (Alt xs)   = Alt   <$> mapM eval xs
+
+eval (Tuple xs) = Tuple <$> mapM eval xs
+
+eval (List xs)  = List  <$> mapM eval xs
+
+eval (Set xs)   = Set   <$> mapM eval xs
+
+evalB :: Monad m => Expr -> Handler m Bool
+evalB e = eval e >>= \case
+  Bool c -> return c
+  _      -> error "Evaluating error: a wrong Boolean expression.\n"
+
+ident :: Monad m => Expr -> Expr -> Handler m Bool
+
+ident (Alt xs) y = f (\x -> ident x y) xs
+ident x (Alt ys) = f (ident x) ys
+
+ident (Var i) y = getAssignment i >>= \case
+  Just x  -> setSwap (swapAssignment i) >> ident x y
+  Nothing -> eval y >>= setAssignment i >> return True
+
+ident x (Var i) = getAssignment i >>= \case
+  Just y  -> setSwap (swapAssignment i) >> ident x y
+  Nothing -> eval x >>= setAssignment i >> return True
+
+ident (Ptr i x) y = ident x y >>= \case
+  True  -> eval y >>= \e ->
+           getSwap >>= \sw ->
+           setAssignment i (Swap e sw) >> return True
+  False -> return False
+
+ident x (Ptr i y) = ident x y >>= \case
+  True  -> eval x >>= \e ->
+           getSwap >>= \sw ->
+           setAssignment i (Swap e sw) >> return True
+  False -> return False
+
+ident (Ref i x) y = ident x y >>= \case
+  True  -> eval y >>= setAssignment i >> return True
+  False -> return False
+
+ident x (Ref i y) = ident x y >>= \case
+  True  -> eval x >>= setAssignment i >> return True
+  False -> return False
+
+ident (IfElse c t f) y = eval c >>= \case
+  Bool True  -> ident t y
+  Bool False -> ident f y
+  otherwise  -> return False
+
+ident x (IfElse c t f) = eval c >>= \case
+  Bool True  -> ident x t
+  Bool False -> ident x f
+  otherwise  -> return False
+
+ident (CaseOf e []) y = return False
+ident (CaseOf e ((p,x):cs)) y = ident e p >>= \case
+  True  -> ident x y
+  False -> ident (CaseOf e cs) y
+
+ident x (CaseOf e []) = return False
+ident x (CaseOf e ((p,y):cs)) = ident e p >>= \case
+  True  -> ident x y
+  False -> ident x (CaseOf e cs)
+
+ident (Swap x sw) y = setSwap sw >> ident x y
+ident x (Swap y sw) = setSwap sw >> ident x y
+
+ident (Call n args) y = getFun n >>= \f -> f <$> mapM eval args >>= \e -> ident e y
+ident x (Call n args) = getFun n >>= \f -> f <$> mapM eval args >>= \e -> ident x e
+
+ident (Sym x) y = eval y >>= \case
+  Sym s -> return (s == x)
+  _     -> return False
+
+ident x (Sym y) = eval x >>= \case
+  Sym s -> return (s == y)
+  _     -> return False
+
+ident (Int x) y = eval y >>= \case
+  Int i -> return (i == x)
+  _     -> return False
+
+ident x (Int y) = eval x >>= \case
+  Int i -> return (i == y)
+  _     -> return False
+
+ident Any _ = return True
+ident _ Any = return True
+
+ident (Term (T x)) (Term (T y)) = ident x y
+ident (Term (T x)) (Term y) = eval x >>= \case
+  Term t    -> ident t y
+  otherwise -> return False
+ident (Term x) (Term (T y)) = eval y >>= \case
+  Term t    -> ident x t
+  otherwise -> return False
+ident (Term (x :> xs)) (Term (y :> ys)) = ident (List (x:xs)) (List (y:ys))
+
+ident (Tuple xs) (Tuple ys) = g xs ys
+
+ident (List xs) (List ys) = g xs ys
+
+ident (Set xs) (Set ys) = g xs ys
+
+ident _ _ = error "Error: An unsupported identification.\n"
+
 where
-  f :: LTerm -> (Term LSymbol LTExpr)
-  f (T y) = T y
-  f ((Sym y) :> ys) = y :> (map f ys)
-  f y = T y
-
-evalT :: Monad m => PTerm -> Handler m LTerm
-evalT (T x) = evalTE x
-evalT (x :> xs) = evalTE x >>= \case
-  (T (Sym s)) -> (s :>) <$> (mapM evalT xs)
-  _ -> error "Evaluating error: a term header is not a logical symbol\n"
-
-evalTE :: Monad m => PTExpr -> Handler m LTerm
-evalTE (Var x) = getAssignment x >>= \case
-  Just y  -> return y
-  Nothing -> error "Evaluating error: a program variable is not initialized\n"
-evalTE (Ptr x e) =
-evalTE (S x) = return (T (LSym x))
-evalTE (I x) = return (T (LSym (IL x)))
-
-eval (X i) = getAssignment i >>= \case
-  Just x  -> return x
-  Nothing -> error "Evaluating error: a variable is not initialized\n"
-
-eval (I i) = return (IE i)
-
-eval (B c) = return (BE c)
-
-eval (S x) = return (SE x)
-
-eval (Program.Term x y) = do
-  SE s <- eval x
-  LE es <- eval y
-  return (TE (s :> map (\(TE t) -> t) es))
-
-eval (List x) = LE <$> mapM eval x
-
-eval (Tuple x) = LE <$> mapM eval x
-
-eval (Not x) = BE . Prelude.not . bool <$> eval x
-
-eval (And x) = BE <$> (mapM eval x >>= foldrM (\y -> return . (bool y &&)) True)
-
-eval (Or x) = BE <$> (mapM eval x >>= foldrM (\y -> return . (bool y ||)) False)
-
-eval (Equal x y) = BE <$> liftM2 (==) (eval x) (eval y)
-
-eval (NEqual x y) = BE <$> liftM2 (/=) (eval x) (eval y)
-
-eval (In x y) = do
-  xx <- eval x
-  LE yy <- eval y
-  return( BE (xx `elem` yy))
-
-eval (Args x) = eval x >>= \case
-  (TE t) -> (return . LE . fmap TE . Term.args) t
-  (PE p) -> (return . LE . fmap getTermRef . zip [0..] . Term.args) t
-    where
-      TE t = expr p
-      getTermRef (i,x) = PE (IPtr (TE x) p (\(TE u) (TE v) -> TE (Term.change u i v)))
-
--- replace :: Monad m => LExpr -> LExpr -> Handler m ()
--- replace (PE (RPtr _ sw)) = sw
--- replace (PE (IPtr _ par sw)) = let re = expr par in replace (PE par) . sw re
--- replace _ = error "Ambiguous first argument of the replace operator"
---
--- make :: Monad m => PTerm -> Handler m ()
--- make (Replace x y) = join $ liftM2 replace (eval x) (eval y)
---
---
--- ident :: Monad m => PTerm -> PTerm -> Handler m Bool
---
--- ident x (X i) = getAssignment i >>= \case
---   Just y  -> identPtr x y (RPtr y (swapAssignment i))
---   Nothing -> error "Evaluating error: a variable is not initialized\n"
---
--- ident (X i) y = do
---   e <- eval y
---   getAssignment i >>= \case
---     Just x
---       | x == e    -> return True
---       | otherwise -> return False
---     Nothing       -> setAssignment i e >> return True
---
--- ident (Ref i x) y = do
---   c <- ident x y
---   if c
---     then eval y >>= setAssignment i >> return True
---     else return False
---
--- ident (I x) t = eval t >>= \case
---   (IE y)
---     | x == y    -> return True
---     | otherwise -> return False
---
--- ident (B x) t = eval t >>= \case
---   (BE y)
---     | x == y    -> return True
---     | otherwise -> return False
---
--- ident (S x) t = eval t >>= \case
---   (SE y)
---     | x == y    -> return True
---     | otherwise -> return False
---
--- ident (Term (S x) p) (Term (S y) q)
---   | x /= y    = return False
---   | otherwise = ident p q
---
--- ident (List x) (List y)
---   | length x == length y = fmap and (zipWithM ident x y)
---   | otherwise            = return False
---
--- ident (Tuple x) (Tuple y)
---   | length x == length y = fmap and (zipWithM ident x y)
---   | otherwise            = return False
---
--- ident _ _ = return False
---
---
--- -- Identify a program term with a given expression
--- -- Returns True if there is an assignment of program variables for which the evaluating
--- -- of program term coincides with the expression, and False otherwise.
--- -- State of Handler stores assignments of program variables.
--- identExpr :: Monad m => PTerm -> LExpr -> Handler m Bool
---
--- identExpr (X i) e = getAssignment i >>= \case
---   Just x
---     | x == e    -> return True
---     | otherwise -> return False
---   Nothing       -> setAssignment i e >> return True
---
--- identExpr (Ref i x) e = do
---   c <- identExpr x e
---   if c
---     then setAssignment i e >> return True
---     else return False
---
--- identExpr (I x) (IE y)
---   | x == y    = return True
---   | otherwise = return False
---
--- identExpr (B x) (BE y)
---   | x == y    = return True
---   | otherwise = return False
---
--- identExpr (S x) (SE y)
---   | x == y    = return True
---   | otherwise = return False
---
--- identExpr (Term (S x) s) (TE (y :> ts))
---   | x /= y    = return False
---   | otherwise = identExpr s (LE (fmap TE ts))
---
--- identExpr (List x) (LE y)
---   | length x == length y = fmap and (zipWithM identExpr x y)
---   | otherwise            = return False
---
--- identExpr (Tuple x) y = identExpr (List x) y
---
--- identExpr _ _ = return False
---
---
--- identPtr :: Monad m => PTerm -> LExpr -> ExprPtr -> Handler m Bool
---
--- identPtr (X i) e _ = getAssignment i >>= \case
---   Just x
---     | x == e    -> return True
---     | otherwise -> return False
---   Nothing       -> setAssignment i e >> return True
---
--- identPtr (Ref i x) e ptr = do
---   c <- identPtr x e ptr
---   if c
---     then setAssignment i e >> return True
---     else return False
---
--- identPtr (Ptr i x) e ptr = do
---   c <- identPtr x e ptr
---   if c
---     then setAssignment i (PE ptr) >> return True
---     else return False
---
--- identPtr (I x) (IE y) _
---   | x == y    = return True
---   | otherwise = return False
---
--- identPtr (B x) (BE y) _
---   | x == y    = return True
---   | otherwise = return False
---
--- identPtr (S x) (SE y) _
---   | x == y    = return True
---   | otherwise = return False
---
--- identPtr (Term x s) (TE (y :> ts)) ptr = do
---     cond <- identPtr x (SE y) (IPtr (SE y) ptr (\(TE (_ :> zs)) (SE z) -> TE (z :> zs)))
---     if cond
---       then let e = LE (fmap TE ts)
---                f (TE (z :> _)) (LE zs) = TE (z :> fmap (\(TE t) -> t) zs)
---            in identPtr s e (IPtr e ptr f)
---       else return False
---
--- identPtr (List x) (LE y) ptr
---   | length x == length y = f x y (\(LE z) -> ([], z)) (\[] z -> LE z)
---   | otherwise            = return False
---     where
---       f :: Monad m => [PTerm] -> [LExpr] -> (LExpr -> ([LExpr],[LExpr])) -> ([LExpr] -> [LExpr] -> LExpr) -> Handler m Bool
---       f [] [] _ _ = return True
---       f (x:xs) (y:ys) to from = liftM2 (&&)
---         (identPtr x y (IPtr y ptr (\u v -> let (h, _:ts) = to u in from h (v:ts))))
---         (f xs ys (\z -> let (h, t:ts) = to z in (t:h, ts))
---                  (\(t:h) ts -> from h (t:ts)))
---
--- identPtr (Tuple x) y ptr = identPtr (List x) y ptr
---
--- identPtr _ _ _ = return False
---
---
--- -- Identify a program term with a given expression by a condition
--- -- Returns True if there is an assignment of program's variables for which the evaluating
--- -- of program term coincides with expression and the condition holds, and False otherwise.
--- -- Warnings: State of Handler can be changed only if there is such assignment.
--- identExprC :: Monad m => PTerm -> LExpr -> PTerm -> Handler m Bool
--- identExprC p e c = do
---   state <- get                -- save current state of Handler
---   is_match <- liftM2 (\x (BE y) -> x && y) (identExpr p e <* saveAssignments) (eval c) -- identify term with expression by condition
---   unless is_match (put state) -- restore current state of Handler if necessary
---   return is_match
---
--- identC :: Monad m => PTerm -> PTerm -> PTerm -> Handler m Bool
--- identC p e c = do
---   state <- get                -- save current state of Handler
---   is_match <- liftM2 (\x (BE y) -> x && y) (ident p e <* saveAssignments) (eval c) -- identify term with expression by condition
---   unless is_match (put state) -- restore current state of Handler if necessary
---   return is_match
-
-class Ident a b where
-  ident :: (Expr a) -> (Expr b) -> Handler m Bool
-  ident (Term (x :> xs)) (Term (y :> ys)) = if x == y then f xs ys else return False
-  ident (Any xs) y = g (\x -> ident x y) xs
-  ident x (Any ys) = g (ident x) ys
-  ident (Tuple xs) (Tuple ys) = f xs ys
-  ident (List xs) (List ys) = f xs ys
-  ident (Set xs) (Set ys) = f xs ys
-  where
-    f xs ys = zipWithM ident xs ys >>= foldrM (\z -> return . (z &&)) True
-    g x ys  = mapM x ys >>= foldrM (\z -> return . (z ||)) False
-
-instance Ident PTExpr b where
-  ident (Term (T (Var i))) y = getAssignment i >>= \case
-    Just x  -> ident x y
-    Nothing -> eval y >>= setAssignment i >> return True
-  ident (Term (T (Ptr i x))) y = ident x y >>= \case
-    True  -> eval y >>= \e -> getSwap >>= \sw -> setAssignment i (Ptr e sw) >> return True
-    False -> return False
-  ident (Term (T (Ref i x))) y = ident x y >>= \case
-    True  -> eval y >>= setAssignment i >> return True
-    False -> return False
-  ident (Term (T (Sym x))) y = eval y >>= \case
-    (Term (T (Sym s))) -> return (x == s)
-    otherwise          -> return False
-  ident (Term (T (Fun name args))) y = error "Error: a function call is not supported"
-  ident (Term (T (IfElse c te fe))) y = eval c >>= \case
-    True  -> ident te y
-    False -> ident fe y
-  ident (Term (T (CaseOf e []))) y = return False
-  ident (Term (T (CaseOf e ((pe,ce):cs)))) y = ident e pe >>= \case
-    True  -> ident ce y
-    False -> ident (Term (T (CaseOf e cs))) y
-
-instance Ident PTExpr PTExpr where
-  ident x (Term (T (Var i))) = getAssignment i >>= \case
-    Just y  -> setSwap (swapAssignment i) >> ident x y
-    Nothing -> error "Error: a program variable is not initialized\n"
+  f x ys  = mapM x ys >>= foldrM (\z -> return . (z ||)) False
+  g xs ys = zipWithM ident xs ys >>= foldrM (\z -> return . (z &&)) True
 
 -- | Run a list of commands
 run :: Monad m => [Command] -> Handler m LExpr
@@ -455,7 +312,7 @@ run ((Assign Select p g c) : cs) =
         _         -> error "Unsupported value in a Select-assignment command\n"
     otherwise -> error "Unsupported pattern in a Select-assignment command\n"
   where
-    f :: [PExpr] -> [Expr a] -> Handler m LExpr
+    f :: [Expr] -> [Expr] -> Handler m Expr
     f [] _ = do
       -- check the condition
       cond <- evalB c
@@ -491,7 +348,7 @@ run ((Assign Select p g c) : cs) =
 -- 4. if n = 0, eval c;
 -- 5. handle '[p1,...,pn] ~= [g2,...,gm,g1] | c'.
 --
-run ((Assign PMUnord p g c) : cs) =
+run ((Assign Unord p g c) : cs) =
   eval p >>= \case
     (List ps) -> (eval g >>= \case
       (List gs) -> when (length ps <= length gs + 1) (f ps gs (length gs))
@@ -500,21 +357,21 @@ run ((Assign PMUnord p g c) : cs) =
   where
     f [] [] 0 = do
       -- check the condition
-      Bool cond <- eval c
+      cond <- evalB c
       -- run the next commands if necessary
       when cond (run cs)
 
     f _ _ 0 = return
 
-    f [Ref i $ Aggr $ Sym AnySequence] ys n = do
+    f [Ref i AnySeq] ys n = do
       -- assign a program variable with the number i the list ys
-      ident (Aggr $ Sym $ X i) (List ys)
+      ident (Var i) (List ys)
       -- check the condition
-      Bool cond <- eval c
+      cond <- evalB c
       -- run the next commands if necessary
       when cond (run cs)
 
-    f (z@(Ref i $ Aggr $ Sym AnySequence):x:xs) (y:ys) n = do
+    f (z@(Ref i AnySeq):x:xs) (y:ys) n = do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the first value
@@ -550,8 +407,8 @@ run ((Assign PMUnord p g c) : cs) =
 --
 -- We handle a command 'p << g | c' as follows. First, we eval p as a list of logical expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and c as a logical constant C. If C is true, we assign p the new value [p1,...,pn,g1,...,gm].
 --
-run ((Assign PMAppend p g c) : cs) = do
-  Bool cond <- eval c
+run ((Assign Append p g c) : cs) = do
+  cond <- evalB c
   when cond (isAssigned p >>= \case
     True  -> liftM2 (++) (eval p) (eval g)
     False -> assign p <$> (eval g))
@@ -564,7 +421,7 @@ run ((Assign PMAppend p g c) : cs) = do
 -- next commands
 run ((Branch c b) : cs) = do
   state <- get         -- save current state of Handler
-  Bool cond <- eval c  -- evaluate the condition
+  cond <- evalB c      -- evaluate the condition
   when cond (run b)    -- run the branch commands if the condition holds
   put state            -- restore current state of Handler
   run cs               -- run the next commands
@@ -578,7 +435,7 @@ run ((Branch c b) : cs) = do
 --   commands of the lase case
 -- next commands
 run ((Switch e c i) : cs) = do
-  Bool cond <- eval c
+  cond <- evalB c
   if cond
   then do
     expr <- eval e
@@ -593,7 +450,7 @@ run ((Switch e c i) : cs) = do
       -- identify the first pattern with the logical expression
       is_match <- ident ip expr
       -- check the condition and run the commands of the first case
-      when is_match (saveAssignments *> eval ic >>= \(Bool cond) -> when cond (run ib))
+      when is_match (saveAssignments *> evalB ic >>= \cond -> when cond (run ib))
       -- restore current state of Handler
       put state
       -- run the next case
@@ -601,9 +458,9 @@ run ((Switch e c i) : cs) = do
 
 -- Handle an acting command
 run ((Action a c) : cs) = do
-  Bool cond <- eval c  -- run the condition
+  cond <- evalB c      -- run the condition
   when cond (make a)   -- make the action if the condition holds
-  run cs                -- run the next commands
+  run cs               -- run the next commands
 
 -- Handle an empty command
 run Empty = return Expr.NONE

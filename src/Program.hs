@@ -42,10 +42,6 @@ module Program
       Program.Vars,
       Programs,
       PAssign(..),
-      PBool(..),
-      PExpr,
-      PTerm,
-      PTExpr(..),
       PVars,
       setPrograms,
       setPVars
@@ -69,36 +65,6 @@ import           Utils
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
-
--- | Type of program variable
-type PVar = Int
-
--- | Type of program entries in terminal expressions
-data PEntry
-  = Var PVar                      -- ^ program variable
-  | Ptr PVar PExpr                -- ^ pointer to expression
-  | Ref PVar PExpr                -- ^ reference to expression
-  | Fun LSymbol [PExpr]           -- ^ function call
-  | IfElse PBool PExpr PExpr      -- ^ conditional expression
-  | CaseOf PExpr [(PExpr, PExpr)] -- ^ switching expression
-  deriving (Eq, Ord, Show)
-
--- | Type of program term
-type PTExpr = TExpr PEntry
-
--- | Type of program expressions
-type PExpr = Expr PEntry
-
-data PBool
-  = Const Bool          -- ^ Boolean constant (True or False)
-  | Equal PTerm PTerm   -- ^ statement A eq B
-  | NEqual PTerm PTerm  -- ^ statement A ne B
-  | In PTerm PExpr      -- ^ statement A in B
-  | Not PBool           -- ^ statement not A
-  | And [PBool]         -- ^ statement A and B
-  | Or [PBool]          -- ^ statement A or B
-  | BVar Int            -- ^ Boolean global variable
-  deriving (Eq, Ord, Show)
 
 -- | type of assignment statement
 data PAssign
