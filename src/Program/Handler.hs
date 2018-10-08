@@ -46,10 +46,15 @@ instance Function Expr where
 instance Function a => Function (Expr -> a) where
   apply f args (x:xs) a = apply f ((x,a):args) xs
 
+-- handle :: (Monad m, Function a) => Program -> m a
+-- handle (Program (Header name args) cs) =
+--   let f = execState (run cs) (Info (M.fromList $ zip args args) M.empty)
+--   in return (apply f [] args)
+
 handle :: (Monad m, Function a) => Program -> m a
 handle (Program (Header name args) cs) =
-  let f = execState (run cs) (Info (M.fromList $ zip args args) M.empty)
-  in return (apply f [] args)
+  return (apply (\args -> execState (run cs) (Info (M.fromList $ zip args args) M.empty))
+                [] args)
 
 data Info = Info
   {
@@ -57,7 +62,8 @@ data Info = Info
     vals :: M.Map Var (Args -> Expr)
   }
 
-type Handler m a = StateT Info m (Args -> a)
+-- type Handler m a = StateT Info m (Args -> (a, Args))
+type Handler a = StateT Info Identify a
 
 ------------------------------------------------------------------------------------------
 -- -- Functions
@@ -78,71 +84,109 @@ type Handler m a = StateT Info m (Args -> a)
 
 eval :: Monad m => Expr -> Handler m Expr
 
-eval (Var i) = return (\args -> args ! i)
+eval (Var i) = return (\args -> (args ! i, M.empty))
 
 eval (Ptr _ _) = error "Evaluating error: can't take a pointer in the evaluating mode. Try take a reference x@(...).\n"
 
-eval (Ref i e) = eval e >>= \f -> setVal i f >> return f
+eval (Ref i x) = eval x >>= \f ->
+  return (\args -> let (e, h) = f args in (e, M.insert i e h))
 
-eval x@(Sym _) = return (\args -> x)
+eval x@(Sym _) = return (\args -> (x, M.empty))
 
-eval x@(Int _) = return (\args -> x)
+eval x@(Int _) = return (\args -> (x, M.empty))
 
 eval Any = error "Evaluating error: can't evaluate any expression.\n"
 
 eval AnySeq = error "Evaluating error: can't evaluate any sequence of expressions.\n"
 
-eval x@(Bool _) = return (\args -> x)
+eval x@(Bool _) = return (\args -> (x, M.empty))
 
-eval (Equal x y) = eval x >>= \f -> eval y >>= \g ->
-  return (\args -> Bool $ (f args) == (g args))
+eval (Equal x y) = eval x >>= \fx -> eval y >>= \fy ->
+  return (\args ->
+    let (ex, hx) = fx args
+        (ey, hy) = fy args
+    in (Bool (ex == ey), M.union hx hy))
 
 eval (NEqual x y) = eval x >>= \f -> eval y >>= \g ->
-  return (\args -> Bool $ (f args) != (g args))
-
-eval (In x y) = eval x >>= \f -> eval y >>= \g ->
   return (\args ->
-    let ex = f args
-    in case (g args) of
-      (Alt   ey) -> Bool (elem ex ey)
-      (Tuple ey) -> Bool (elem ex ey) -- tuples are handled as lists
-      (List  ey) -> Bool (elem ex ey)
-      (Set   ey) -> Bool (elem ex ey) -- sets are handled as lists
-      _          -> error "Evaluating error: a wrong in-expression.\n")
+    let (ex, hx) = fx args
+        (ey, hy) = fy args
+    in (Bool (ex != ey), M.union hx hy))
+
+eval (In x y) = eval x >>= \fx -> eval y >>= \fy ->
+  return (\args ->
+    let (ex, hx) = fx args
+        (ey, hy) = fy args
+        r = case ey of
+              (Alt   _) -> Bool (elem ex ey)
+              (Tuple _) -> Bool (elem ex ey) -- tuples are handled as lists
+              (List  _) -> Bool (elem ex ey)
+              (Set   _) -> Bool (elem ex ey) -- sets are handled as lists
+              _         -> error "Evaluating error: a wrong in-expression.\n"
+    in (r, M.union hx hy))
 
 eval (Not x) = evalB x >>= \f ->
-  return (\args -> Bool $ Prelude.not (f args))
+  return (\args -> let (e, h) = f args in (Bool (Prelude.not e), h))
 
-eval (And xs) = map evalB xs >>= \f ->
-  return (\args -> Bool $ foldrM (\y -> return . (y &&)) True (f args))
+eval (And xs) = map evalB xs >>= \fs ->
+  return (\args -> foldr (\f (Bool e,h) -> let (ne,nh) = f args
+                                           in  (Bool (e && ne), M.union h nh))
+                         (Bool True, M.empty) fs)
 
-eval (Or xs) = map evalB xs >>= \f ->
-  return (\args -> Bool $ foldrM (\y -> return . (y ||)) False (f args))
+eval (Or xs) = map evalB xs >>= \fs ->
+  return (\args -> foldr (\f (Bool e,h) -> let (ne,nh) = f args
+                                           in  (Bool (e || ne), M.union h nh))
+                         (Bool False, M.empty) fs)
 
-eval (IfElse c x y) = evalB c >>= \f -> eval x >>= \g -> eval y >>= \h ->
-  return (\args -> if f args then g args else h args)
+eval (IfElse c x y) = evalB c >>= \f -> eval x >>= \fx -> eval y >>= \fy ->
+  return (\args -> let (e, h) = f args in
+    if e then fx (M.union args h) else fy (M.union args h))
 
-eval (CaseOf e []) = error "Evaluating error: can't evaluate an empty case-expression.\n"
-eval (CaseOf e ((p,c):cs)) =
-  ident e p >>= \f -> eval c >>= \g -> eval (CaseOf e cs) >>= \h ->
-  return (\args -> if f args then g args else h args)
+eval (CaseOf x []) = error "Evaluating error: can't evaluate an empty case-expression.\n"
+eval (CaseOf x ((p,c):cs)) =
+  ident x p >>= \f_match -> eval c >>= \f_case -> eval (CaseOf e cs) >>= \g ->
+  return (\args -> let (is_match, h_match) = f_match args in
+    if is_match then f_case (M.union args h_match) else g args)
 
-eval (Term (T x)) = eval x >>= \f -> return (\arg -> Term $ T (f args))
-eval (Term (x :> xs)) = eval x >>= \f -> mapM eval xs >>= \g ->
-  return (\args -> Term $ (f args) :> (g args))
+eval (Term (T x)) = eval x >>= \f ->
+  return (\arg -> let (e, h) = f args in (Term $ T e, h))
 
-eval (Alt xs)   = mapM eval xs >>= \f -> return (\args -> Alt (f args))
+eval (Term (x :> xs)) = eval x >>= \fx -> mapM eval xs >>= \fs ->
+  return (\args ->
+    let (ex, hx) = fx args
+        (es, hs) = foldr (\f (e,h) -> let (ne,nh) = f args
+                                      in  ((ne:e), M.union h nh))
+                         ([], M.empty) fs
+    in (Term (e :> reverse es), M.union hx hs))
 
-eval (Tuple xs) = mapM eval xs >>= \f -> return (\args -> Tuple (f args))
+eval (Alt xs)   = mapM eval xs >>= \fs ->
+  return (\args -> let (es, hs) = foldr (\f (e,h) -> let (ne,nh) = f args
+                                                     in  ((ne:e), M.union h nh))
+                                        ([], M.empty) fs
+  in (Alt (reverse es), hs))
 
-eval (List xs)  = mapM eval xs >>= \f -> return (\args -> List (f args))
+eval (Tuple xs) = mapM eval xs >>= \fs ->
+  return (\args -> let (es, hs) = foldr (\f (e,h) -> let (ne,nh) = f args
+                                                     in  ((ne:e), M.union h nh))
+                                        ([], M.empty) fs
+  in (Tuple (reverse es), hs))
 
-eval (Set xs)   = mapM eval xs >>= \f -> return (\args -> Set (f args))
+eval (List xs)  = mapM eval xs >>= \fs ->
+  return (\args -> let (es, hs) = foldr (\f (e,h) -> let (ne,nh) = f args
+                                                     in  ((ne:e), M.union h nh))
+                                        ([], M.empty) fs
+  in (List (reverse es), hs))
+
+eval (Set xs)   = mapM eval xs >>= \fs ->
+  return (\args -> let (es, hs) = foldr (\f (e,h) -> let (ne,nh) = f args
+                                                     in  ((ne:e), M.union h nh))
+                                        ([], M.empty) fs
+  in (Set (reverse es), hs))
 
 evalB :: Monad m => Expr -> Handler m Bool
 evalB e = eval e >>= \f ->
-  return (\args -> case f args of
-    Bool c -> c
+  return (\args -> let (e, h) = f args in case e of
+    Bool c -> (c, h)
     _      -> error "Evaluating error: a wrong Boolean expression.\n")
 
 ident :: Monad m => Expr -> Expr -> Handler m Bool
@@ -150,7 +194,7 @@ ident :: Monad m => Expr -> Expr -> Handler m Bool
 ident (Alt xs) y = f (\x -> ident x y) xs
 ident x (Alt ys) = f (ident x) ys
 
-ident (Var i) y = getAssignment i >>= \case
+ident (Var i) y = return (\args -> case args !? i of
   Just x  -> setSwap (swapAssignment i) >> ident x y
   Nothing -> eval y >>= setAssignment i >> return True
 
