@@ -65,7 +65,7 @@ data LTerminal
   = LSym LSymbol
   | LFun ([LExpr] -> LExpr)
 
-type LExpr = Expr LSymbol ExprPtr Bool
+type LExpr = Expr -- LSymbol ExprPtr Bool
 
 -- class Expression a where
 --   expr :: a -> LExpr

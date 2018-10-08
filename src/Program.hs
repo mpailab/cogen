@@ -36,18 +36,12 @@ module Program
       newPVars,
       NameSpace,
       Header(..),
-      PTerminal(..),
       Program(..),
-      ProgStmt(..),
+      --Command(..),
       Program.Base,
       Program.Vars,
       Programs,
-      PVExpr,
-      PBool(..),
-      PEntry(..),
-      PExpr,
-      PMType(..),
-      PTerm(..),
+      --PAssign(..),
       PVars,
       setPrograms,
       setPVars
@@ -66,113 +60,26 @@ import           Text.Regex.Posix
 -- Internal imports
 import           Expr
 import           LSymbol
-import           Utils
 import           Term
+import           Utils
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-data PTerminal
-  = X Int           -- ^ program variable
-  | S LSymbol       -- ^ logic symbol
-  | AnySymbol       -- ^ '_' symbol means any argument
-  | AnySequence     -- ^ '__' means any sequence of program expressions
-  | PV [PTerm]      -- ^ any of subterm variants
-  | E PEntry
-  | FunCall PVExpr PVExpr  -- ^ function call
-  | Frag [ProgStmt] -- ^ program fragment
-  | ExtVar Int      -- ^ variable name, used only in fragments
-  | IfElse PBool PVExpr PVExpr
-  | CaseOf PVExpr [(PVExpr, PVExpr)]
-  | Fun Program
-  deriving (Eq, Ord,Show)
-
-data PEntry
-  = Ptr Int PVExpr
-  | Ref Int PVExpr
-  | Inside PVExpr
-  deriving (Eq, Ord, Show)
-
--- | Type of program term
-type PTerm = Term PTerminal
-
-data PBool
-  = Const Bool          -- ^ Boolean constant (True or False)
-  | Equal PTerm PTerm   -- ^ statement A eq B
-  | NEqual PTerm PTerm  -- ^ statement A ne B
-  | In PTerm PVExpr     -- ^ statement A in B
-  | Not PBool           -- ^ statement not A
-  | And [PBool]         -- ^ statement A and B
-  | Or [PBool]          -- ^ statement A or B
-  | BVar Int            -- ^ Boolean global variable
-  deriving (Eq, Ord, Show)
-
-type PVExpr = VExpr PTerminal PEntry
-
--- | Type of program expressions
-type PExpr = Expr PTerminal PEntry PBool
-
--- | type of assignment statement
-data PMType = PMSelect -- ^ match patterns with list elements (l1,...,lN <- right)
-            | PMUnord  -- ^ match list pattern with list of elements in any order (left ~= right)
-            | PMAppend -- ^ appends right part to variable (left << right)
-            deriving (Eq, Ord)
-
-instance Show PMType where
-  show PMAppend = " << "
-  show PMUnord = " ~= "
-  show PMSelect = " <- "
+type PVar = Int
 
 data Header = Header
   {
-    name      :: String,
-    arguments :: [PTerminal]
+    name      :: PVar,
+    arguments :: [PVar]
   }
   deriving (Eq, Ord,Show)
 
--- | Type of program statement
-data ProgStmt
-  -- | Assigning instruction iterates terms with respect to a given condition
-  --   and assigns them to a given program variable
-  = Assign
-    {
-      pmtype    :: PMType, -- ^ type of pattern matching in assignment
-      pattern_  :: PVExpr,  -- ^ assigned pattern
-      generate  :: PVExpr,  -- ^ generator of list of terms
-      condition :: PBool   -- ^ condition for iterating of terms
-    }
-  -- | Branching instruction jumps to a given program fragment
-  --   with respect to a given condition
-  | Branch
-    {
-      condition :: PBool,   -- ^ condition for the branch
-      branch    :: [ProgStmt]  -- ^ branch to program fragment
-    }
-
-  -- | Switching instruction jumps to a program fragment defined by a given expression
-  | Switch
-    {
-      expression :: PVExpr,              -- ^ expression
-      condition  :: PBool,              -- ^ condition for switching
-      cases      :: [(PVExpr, PBool, [ProgStmt])]  -- ^ list of pairs (pattern, program fragment)
-    }
-
-  -- | Acting instruction performs a given action with respect to a given condition
-  | Action
-    {
-      action    :: PVExpr,  -- ^ action
-      condition :: PBool   -- ^ condition of action
-    }
-
-  -- | program fragment variable with delayed substitution
-  | DelayedFrag PTerm
-
-  deriving(Eq,Ord,Show)
-
 -- | Type of program : header + command list
-data Program = Program Header [ProgStmt]
+data Program
+  = Program Header [Command]
   | Empty
-  deriving(Eq,Ord,Show)
+  deriving (Eq,Ord,Show)
 
 -- | Type of programs database
 type Programs = M.Map LSymbol Program
@@ -237,18 +144,18 @@ class Monad m => Vars m where
     in return x
 
   -- | Get a program variable by its name
-  getPVarIfExist :: String -> m (Maybe PTerminal)
-  getPVarIfExist name = getPVars >>= \db -> return $ X <$> M.lookup name (numbers db)
+  getPVarIfExist :: String -> m (Maybe Expr)
+  getPVarIfExist name = getPVars >>= \db -> return $ Var <$> M.lookup name (numbers db)
 
   -- | Get a program variable by its name
-  getPVar :: String -> m PTerminal
+  getPVar :: String -> m Expr
   getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
-    Just n  -> return (X n)
+    Just n  -> return (Var n)
     Nothing -> let n = curNum db
                    new_db = PVars (listArray (1,n) (name : elems (names db)))
                                   (M.insert name n (numbers db))
                                   (n + 1)
-               in setPVars new_db >> return (X n)
+               in setPVars new_db >> return (Var n)
 
 -- | Class for namespace of logical symbols and program variables
 class (LSymbol.Base m, Program.Vars m) => NameSpace m
