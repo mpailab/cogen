@@ -31,17 +31,29 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-type FExpr = forall m . Monad m => [Expr] -> m Expr
-type SExpr = forall m . Monad m => Expr -> m ()
+type Var = Int
+type Args = M.Map Var Expr
+
+class Function m a b where
+  apply :: (Args -> m a) -> [(Var,Expr)] -> [Var] -> b
+
+instance Monad m => Function m a (m a) where
+  apply f args [] = f (M.fromList args)
+
+instance (Monad m, Function m a b) => Function m a (Expr -> b) where
+  apply f args (x:xs) a = apply f ((x,a):args) xs
+
+type FExpr = forall m a . (Monad m, Function m Expr a) => a
+type SExpr = forall m a . (Monad m, Function m () a) => a
 type TExpr = Term Expr
 
 -- | Type of expression with a type of terminal expressions @a@
 data Expr
 
   -- Simple expressions:
-  = Var Int        -- ^ program variable
-  | Ptr Int Expr   -- ^ pointer to expression
-  | Ref Int Expr   -- ^ reference to expression
+  = Var Var        -- ^ program variable
+  | Ptr Var Expr   -- ^ pointer to expression
+  | Ref Var Expr   -- ^ reference to expression
 
   -- Constant expressions:
   | Sym LSymbol    -- ^ logical symbol
