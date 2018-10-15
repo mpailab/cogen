@@ -30,8 +30,8 @@ import           Data.Monoid
 -- Internal imports
 
 echo :: Monad f => String -> f ()
-echo = traceM
--- echo x = return ()
+-- echo = traceM
+echo x = return ()
 
 infixr 5 +>+
 (+>+) :: Monad m => String -> m String -> m String

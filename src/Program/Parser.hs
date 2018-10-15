@@ -92,13 +92,13 @@ topIndent :: NameSpace m => Parser m IndentSt
 topIndent = head . indents <$> getState
 
 pushIndent :: NameSpace m => IndentSt -> Parser m ()
-pushIndent i = traceM ("pushIndent "++show i) >> modifyState (\st -> let is = indents st in st {indents = i:is})
+pushIndent i = echo ("pushIndent "++show i) >> modifyState (\st -> let is = indents st in st {indents = i:is})
 
 popIndent :: NameSpace m => Parser m IndentSt
-popIndent = traceM "popIndent" >> getState >>= (\st -> let i:is = indents st in putState st {indents = is} >> return i)
+popIndent = echo "popIndent" >> getState >>= (\st -> let i:is = indents st in putState st {indents = is} >> return i)
 
 updateIndent :: NameSpace m => IndentSt -> Parser m ()
-updateIndent i = traceM ("updateIndent "++show i) >> modifyState (\st -> let _:is = indents st in st {indents = i:is})
+updateIndent i = echo ("updateIndent "++show i) >> modifyState (\st -> let _:is = indents st in st {indents = i:is})
 
 getPos :: NameSpace m => Parser m (Int,Int)
 getPos = getPosition >>= \pos -> return (sourceLine pos, sourceColumn pos)
@@ -516,11 +516,11 @@ makeBinOp :: NameSpace m => Bool -> String -> Parser m (Expr -> Expr -> Expr)
 makeBinOp assoc name = do {
   ; s <- getLSymbol name
   ; op <- case s of {Just x -> return x; _ -> parserZero <?> "unknown operator "++name}
-  ; return (\x y -> Call (Sym op) (args op x++args op y))   
+  ; return (\x y -> Call (Sym op) (args op x++args op y))
 } where args op t@(Call (Sym o) a) = if o==op then a else [t]
         args _ t = [t]
 
-vexprParser :: NameSpace m => Parser m Expr 
+vexprParser :: NameSpace m => Parser m Expr
 vexprParser = buildExpressionParser tableExpr atomExprParser
 
 -- | Parser of program expressions

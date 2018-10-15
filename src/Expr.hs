@@ -1,7 +1,6 @@
-{-# LANGUAGE RankNTypes           #-}
-{-# LANGUAGE StandaloneDeriving   #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE RankNTypes           #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 {-|
 Module      : Expr
@@ -118,7 +117,7 @@ instance Show PAssign where
   show Select = " <- "
   show Unord  = " ~= "
   show Append = " << "
-  
+
 -- | Type of program statement
 data Command
 
