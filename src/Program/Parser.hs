@@ -48,24 +48,57 @@ import           Utils
 
 data PState = PSt {
     inFrag :: Bool,
-    indents :: [IndentSt]
+    isPattern :: Bool,
+    indents :: [IndentSt],
+    extvars :: [(Int,Int)]
   }
 type IndentSt = Either (Int,Int) Int
 
 initState :: PState
-initState = PSt { inFrag=False, indents=[Left (0,0)] }
+initState = PSt { inFrag=False, isPattern = False, indents=[Left (0,0)], extvars=[] }
+
+-- modifyStateInF :: NameSpace m => (PState -> PState) -> (t -> Parser m a) -> t -> Parser m a
+-- modifyStateInF ch f Var = do old <- getState
+--                            modifyState $ f
+--                            res <- f
+--                            setState old
+
+setPmEnabledIn :: NameSpace m => Bool -> Parser m a -> Parser m a
+setPmEnabledIn en f = setPmEnabledInF en (\() -> f) ()
+
+setPmEnabledInF :: NameSpace m => Bool -> (t -> Parser m a) -> t -> Parser m a
+setPmEnabledInF en f x = do old <- isPattern <$> getState
+                            modifyState (\st -> st{ isPattern = en })
+                            res <- f x
+                            modifyState (\st -> st{ isPattern = old })
+                            return res
+
+inpattern :: NameSpace m => Parser m a -> Parser m a
+inpattern = setPmEnabledIn True
+
+nopattern :: NameSpace m => Parser m a -> Parser m a
+nopattern = setPmEnabledIn False
+
+inpatternF :: NameSpace m => (t -> Parser m a) -> t -> Parser m a
+inpatternF = setPmEnabledInF True
+
+nopatternF :: NameSpace m => (t -> Parser m a) -> t -> Parser m a
+nopatternF = setPmEnabledInF False
+
+ispattern :: NameSpace m => Parser m ()
+ispattern = isPattern <$> getState >>= guard
 
 topIndent :: NameSpace m => Parser m IndentSt
 topIndent = head . indents <$> getState
 
 pushIndent :: NameSpace m => IndentSt -> Parser m ()
-pushIndent i = traceM ("pushIndent "++show i) >> modifyState (\st -> let is = indents st in st {indents = i:is})
+pushIndent i = echo ("pushIndent "++show i) >> modifyState (\st -> let is = indents st in st {indents = i:is})
 
 popIndent :: NameSpace m => Parser m IndentSt
-popIndent = traceM "popIndent" >> getState >>= (\st -> let i:is = indents st in putState st {indents = is} >> return i)
+popIndent = echo "popIndent" >> getState >>= (\st -> let i:is = indents st in putState st {indents = is} >> return i)
 
 updateIndent :: NameSpace m => IndentSt -> Parser m ()
-updateIndent i = traceM ("updateIndent "++show i) >> modifyState (\st -> let _:is = indents st in st {indents = i:is})
+updateIndent i = echo ("updateIndent "++show i) >> modifyState (\st -> let _:is = indents st in st {indents = i:is})
 
 getPos :: NameSpace m => Parser m (Int,Int)
 getPos = getPosition >>= \pos -> return (sourceLine pos, sourceColumn pos)
@@ -150,14 +183,12 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-", "@", "&&", "||", "|", "+", "-", "*", "/", "&", "$", "<<", "~=", ".."]
+  , reservedOpNames= ["=", "<-", "@", "&&", "||", "|", "+", "++", "-", "*", "/", "&", "$", "<<", "~=", ".."]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "eq", "ne", "in",
                       "args", "replace", "_", "__"]
   , caseSensitive  = True
   }
-
-
 
 -- | Lexer for Coral language - collection of lexical parsers for tokens
 coralLexer :: NameSpace m => GenTokenParser Text.Text PState m
@@ -211,6 +242,11 @@ reservedParserU = reserved coralLexer
 commaSepParser :: NameSpace m => Parser m a -> Parser m [a]
 commaSepParser = commaSep coralLexer
 
+-- | Lexeme parser @semiSepParser p@ parses /zero/ or more occurrences of @p@ separated
+-- by semicolon. Returns a list of values returned by @p@.
+semiSepParser :: NameSpace m => Parser m a -> Parser m [a]
+semiSepParser = semiSep coralLexer
+
 -- | Parses any white space. White space consists of /zero/ or more
 -- occurrences of a space character (any character which satisfies isSpace), a line
 -- comment or a block (multi line) comment. Block comments may be nested. How comments are
@@ -218,132 +254,284 @@ commaSepParser = commaSep coralLexer
 whiteSpaceParser :: NameSpace m => Parser m ()
 whiteSpaceParser = whiteSpace coralLexer
 
+funcApp :: NameSpace m => Parser m ()
+funcApp = try $ char '`' >> notFollowedBy (letter <|> oneOf "[({") >> whiteSpaceParser
+--  <|> do p0 <- getPos
+--         whiteSpaceParser
+--         p1 <- getPos
+--         guard $ p0 /= p1
+ident :: NameSpace m => Parser m String
+ident = liftM2 (:) (identStart coralDef) (many (identLetter coralDef))
+
+prefixFunc :: NameSpace m => Parser m Expr -> Parser m Expr
+prefixFunc p =  whiteSpaceParser >> char '`' >> ((ident >>= symbolOrVar) <|> p)
+
+infxFunc :: NameSpace m => Parser m Expr -> Parser m Expr -> Expr -> Parser m Expr
+infxFunc parg pf first = do
+  dbg "try infix function"
+  f <- prefixFunc pf
+  dbg "infix found"
+  args <- option [] (funcApp >> many parg)
+  whiteSpaceParser
+  dbg $ "args = "++show args
+  return $ Call f $ first:args
+
+symbolOrVar :: NameSpace m => String -> Parser m Expr
+symbolOrVar name = getLSymbol name >>= \case
+  Just s  -> return (Sym s)
+  Nothing -> getPVar name
+
 -- | Parser of integers
 intParser :: NameSpace m => Parser m Int
 intParser = fromInteger <$> naturalParser
 
--- | Parser of symbols (logical symbols or variables)
-symbolParser :: NameSpace m => Parser m PTerminal
-symbolParser = identifierParser >>= \name -> getLSymbol name >>= \case
-  Just s  -> return (S s)
-  Nothing -> getPVar name
+extVarParser :: NameSpace m => Parser m Expr
+extVarParser = do
+  st <- getState
+  guard (inFrag st)
+  char '$'
+  name <- identifierParser
+  Var n <- getPVar name
+  Var fn <- getPVar (name ++ "__")
+  putState $ st { extvars = (n,fn):(extvars st) }
+  return $ Var fn -- !!!!!!!!! TODO : ExtVar n
 
-terminalParser:: NameSpace m => Parser m PTerminal
-terminalParser = symbolParser <|> fragParser <|> (E <$> entryParser True)
+-- | Parser of symbols (logical symbols or variables)
+symbolParser :: NameSpace m => Parser m Expr
+symbolParser = extVarParser <|> (identifierParser >>= symbolOrVar)
+
+terminalParser :: NameSpace m => Parser m Expr
+terminalParser = symbolParser <|> fragParser <|> entryParser True
 
 -- | Parser of program variables
-varParser :: NameSpace m => Parser m PTerminal
+varParser :: NameSpace m => Parser m Expr
 varParser = identifierParser >>= \name -> getLSymbol name >>= \case
   Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
   Nothing -> getPVar name
 
-entryTailParser :: NameSpace m => Bool -> Int -> Parser m PEntry
+data PatternType
+  = NoPattern
+  | ElemPattern
+  | InListPattern
+  deriving (Eq,Show)
+
+pattp NoPattern _ = NoPattern
+pattp _ pt = pt
+
+anySeq :: NameSpace m => Parser m Expr
+anySeq = ispattern >> try (
+  (reservedParser "__" >> return AnySeq) <|> do {
+  ; Var n <- varParser
+  ; reservedOpParser "@" >> reservedParser "__"
+  ; return $ Ref n AnySeq
+  })
+
+anyElem :: NameSpace m => Parser m Expr
+anyElem = ispattern >> reservedParser "_" >> return Any
+-- anyElemParser NoPattern = parserZero
+-- anyElemParser _         = reservedParser "_" >> return AnySymbol
+
+varPatternParser :: NameSpace m => PatternType -> Parser m Expr
+varPatternParser NoPattern = varParser
+varPatternParser InListPattern
+  = (reservedParser "__" >> return AnySeq)
+  <|> varPatternParser ElemPattern
+varPatternParser ElemPattern
+  = (reservedParser "_" >> return Any)
+  <|> varParser
+
+entryTailParser :: NameSpace m => Bool -> Int -> Parser m Expr
 entryTailParser trm n = do
+  dbg "reading entry 1"
   refptr <- (reservedOpParser "&" >> return Ptr) <|> (reservedOpParser "@" >> return Ref)
-  expr <- if trm then Term <$> termParser else aggrParser
+  dbg "reading entry 2"
+  expr <- if trm then Term <$> termParser else vexprParser
   return (refptr n expr)
 
 
-entryParser :: NameSpace m => Bool -> Parser m PEntry
-entryParser trm = dbg "parse entry" >> do { X n <- varParser
+entryParser :: NameSpace m => Bool -> Parser m Expr
+entryParser trm = dbg "parse entry" >> do { Var n <- varParser
                      ; entryTailParser trm n
                      } <?> "entry"
 
-simpleAggrParser :: NameSpace m => Parser m PVExpr
-simpleAggrParser =  dbg "parse aggr" >> (
-              (reservedParser "_" >> return (Sym AnySymbol))
-          <|> (Int  <$> intParser)
-          <|> (compParser >>= \case
-              Term (T s@(S _)) -> return $ Sym s
-              Term (T v@(X n)) ->
-                (Entr <$> entryTailParser False n) <|> return (Sym v)
-              cmp -> return cmp
-              -- <* dbg "return Comp"
-              )
-          <?> "aggregate")
-
-
-aggrParser :: NameSpace m => Parser m PVExpr
-aggrParser =  (Sym <$> fragParser)
-          <|> simpleAggrParser
-          <|> do { reservedParser "case"
-                 ; x <- simpleAggrParser
-                 ; reservedParser "of"
-                 ; cases <- many1 (indentBlock (liftM2 (,) simpleAggrParser (reservedOpParser "->" >> aggrParser)))
-                 ; return $ Sym (CaseOf x cases)
-                 }
-          <?> "aggregate"
-
-simpleTermParser :: NameSpace m => Parser m PTerm
-simpleTermParser =  dbg "parse one term" >>
-      (   parensParser termParser
-      <|> (symbolParser >>= \sym ->
-              (T . E) <$> tryEntry sym
-          <|> (sym :>) <$> (dbg "try brackets" >> bracketsParser (commaSepParser termParser <|> return []))
-          <|> (sym :>>) <$> (dbg "try :>> var" >> indented >> varParser)
-          <|> (dbg ("return T "++show sym) >> return (T sym))))
-          <?> "term"
-          where
-            tryEntry (X n) = dbg "try entry" >> entryTailParser True n
-            tryEntry _ = parserZero
-
-
-termParser :: NameSpace m => Parser m PTerm
-termParser =  dbg "parse term variants" >> do
-                first <- simpleTermParser
-                other <- many (reservedOpParser "|" >> simpleTermParser)
-                return $ if null other then first else T (PV $ first:other)
-
-compParser :: NameSpace m => Parser m PVExpr
-compParser =  dbg "parse comp" >> ((List  <$> bracketsParser (commaSepParser aggrParser))
-          <|> (Tuple <$> parensParser   (commaSepParser aggrParser))
-          <|> (Set   <$> bracesParser   (commaSepParser aggrParser))
+compParser :: NameSpace m => Parser m Expr
+compParser =  dbg "parse comp" >> (
+              (List  <$> bracketsParser (commaSepParser $ anySeq <|> vexprParser))
+          <|> (Tuple <$> parensParser (commaSepParser $ anySeq <|> vexprParser))
+          <|> (Set   <$> bracesParser (commaSepParser $ anySeq <|> vexprParser))
           <|> (Term  <$> (termParser <* dbg "return Term"))
           <?> "composite")
 
-relationParser :: NameSpace m => Parser m PBool
-relationParser = termParser >>= \left ->
+simpleVExprParser :: NameSpace m => Parser m Expr
+simpleVExprParser = dbg "parse vexpr" >> (
+                      Int <$> intParser
+                  <|> (compParser >>= \case
+                        Term (T v@(Var n)) -> entryTailParser False n <|> return v
+                        Term (T t)       -> return t
+                        Tuple [expr]     -> return expr  -- ^ expression in parentheses is parsed as one-element tuple
+                        expr             -> return expr
+                      )
+                  <?> "vexpr")
+
+subExprParser :: NameSpace m => Bool -> Parser m Expr
+subExprParser tm = if tm then Term <$> simpleTermParser else vexprParser
+
+-- | parses case-of with cases in each line or one-line expression case Var of {pat1->res1; pat2->res2;...}
+caseExprParser :: NameSpace m => Bool -> Parser m Expr
+caseExprParser tm = do { reservedParser "case"
+                      ; dbg "parse case-of expression"
+                      ; x <- nopattern simpleVExprParser
+                      ; reservedParser "of"
+                      ; cases <- many1 (indentBlock oneCase)
+                              <|> bracesParser (semiSepParser oneCase)
+                      ; return $ CaseOf x cases
+                      }
+                      where oneCase = liftM2 (,) simpleVExprParser (reservedOpParser "->" >> subExprParser tm)
+
+ifExprParser :: NameSpace m => Bool -> Parser m Expr
+ifExprParser tm = do { reservedParser "if"
+                     ; dbg "parse if expression"
+                     ; cond <- inpattern boolParser
+                     ; reservedParser "then"
+                     ; iftrue <- indentBlock $ subExprParser tm
+                     ; reservedParser "else"
+                     ; iffalse <- indentBlock $ subExprParser tm
+                     ; return $ IfElse cond iftrue iffalse
+                     }
+
+complexExprParser :: NameSpace m => Bool -> Parser m Expr
+complexExprParser tm = ifExprParser tm <|> ifExprParser tm
+
+-- | Parse arguments of function call in expression
+vexprTailParser :: NameSpace m => Expr -> Parser m Expr
+vexprTailParser h = (dbg "try expr `" >> funcApp >> Call h <$> many (nopattern vexprParser))
+                <|> infxFunc (dbg "try infx expr arg" >> nopattern vexprParser) (dbg "try infx expr header" >> {- nopattern ??? -} vexprParser) h
+                <|> return h
+
+-- | parse VExpr, first argument means allow or not pattern-matching
+atomExprParser :: NameSpace m => Parser m Expr
+atomExprParser = fragParser
+          <|> (simpleVExprParser >>= vexprTailParser)
+          <|> (complexExprParser False >>= vexprTailParser)
+          <?> "vexpr"
+
+-- | try parse term or function call with given header
+parseTermArgs :: NameSpace m => Expr -> Parser m TExpr
+parseTermArgs h =
+          (funcApp >> (T . Call h) <$> many (nopattern vexprParser))
+      <|> T <$> infxFunc (toExpr <$> nopattern simpleTermParser) (toExpr <$> simpleTermParser) h
+      <|> (h :>) <$> (dbg "try brackets" >> bracketsParser (commaSepParser (T <$> anySeq <|> termParser) <|> return []))
+      <|> (h :>>) <$> (dbg "try :>> var" >> indented >> varParser)
+      <|> (dbg ("return T "++show h) >> return (T h))
+      where toExpr (T t) = t
+            toExpr t     = Term t
+
+simpleTermParser :: NameSpace m => Parser m TExpr
+simpleTermParser = getState >>= (\st -> dbg ("parse term or header : pm = " ++ show (isPattern st))) >> (
+          (dbg "th : try if" >> T <$> ifExprParser True)
+      <|> (dbg "th : try case" >> T <$> caseExprParser True)
+      <|> (dbg "th : try parens" >> parensParser simpleTermParser >>= \case
+              e@(T (Ref _ _)) -> return e   -- ^ already reference to term
+              e@(T (Ptr _ _)) -> return e   -- ^ already pointer to term
+              T h -> parseTermArgs h    -- ^ only header read which is symbol, conditional expression or function call
+              t  -> return t            -- ^ otherwise it is already a term
+          )
+      <|> do { dbg "th : try symbol"
+             ; sym <- anyElem <|> symbolParser
+             ; dbg $ "sym = "++show sym
+             ; T <$> tryEntry sym <|> parseTermArgs sym
+             }
+    )
+    where
+      tryEntry (Var n) = dbg "try entry" >> entryTailParser True n
+      tryEntry _ = parserZero
+
+-- simpleTermParser :: NameSpace m => PatternType -> Parser m TExpr
+-- simpleTermParser pm =  dbg "parse one term" >>
+--       (   parensParser (termParser pm)
+--       <|> (symbolParser >>= \sym ->
+--               (T . E) <$> tryEntry sym
+--           <|> (sym :>) <$> (dbg "try brackets" >> bracketsParser (commaSepParser (termParser $ pattp pm InListPattern) <|> return []))
+--           <|> (sym :>>) <$> (dbg "try :>> var" >> indented >> varParser)
+--           <|> (dbg ("return T "++show sym) >> return (T sym))))
+--           <?> "term"
+--           where
+--             tryEntry (Var n) = dbg "try entry" >> entryTailParser pm True n
+--             tryEntry _ = parserZero
+
+termParser :: NameSpace m => Parser m TExpr
+termParser =  dbg "parse term variants" >> do
+                  first <- simpleTermParser
+                  dbg $ "term : first var = "++show first
+                  other <- many $ reservedOpParser "|" >> simpleTermParser
+                  dbg $ "term : other vars = "++show other
+                  return $ if null other then first else T (Alt $ map Term $ first:other)
+
+
+relationParser :: NameSpace m => Parser m Expr
+relationParser = inpattern vexprParser >>= \left ->
                   do {
                      ; rel <- choice[reservedParser "eq" >> return Equal, reservedParser "ne" >> return NEqual]
-                     ; right <- termParser
+                     ; right <- inpattern vexprParser
                      ; return (rel left right)
                      }
               <|> do {
                      ; reservedParser "in"
-                     ; set <- compParser
+                     ; set <- (inpattern compParser <|> varParser) -- ??? do we allow patterns in sets or lists in the right part of `in`
                      ; return (In left set)
                      }
               <|> case left of
-                    T (X n) -> return (BVar n) -- ^ global variable
+                    (Var n) -> return (BVar n) -- global variable
                     _ -> parserZero
               <?> "relation"
 
-atomBool :: NameSpace m => Parser m PBool
+atomBool :: NameSpace m => Parser m Expr
 atomBool =  dbg "atomBool" >> (parensParser boolParser
-        <|> (reservedParser "True"  >> return (Const True ))
-        <|> (reservedParser "False" >> return (Const False))
+        <|> (reservedParser "True"  >> return (Bool True ))
+        <|> (reservedParser "False" >> return (Bool False))
         <|> relationParser
         <?> "atomic bool")
 
-boolParser :: NameSpace m => Parser m PBool
+boolParser :: NameSpace m => Parser m Expr
 boolParser = buildExpressionParser tableBool atomBool
           <?> "boolean expression expected"
 
-tableBool :: NameSpace m => [[Operator Text.Text PState m PBool]]
+tableBool :: NameSpace m => [[Operator Text.Text PState m Expr]]
 tableBool = [ [Prefix (dbg "try parse no" >> reservedParser "no"  >> return pNot)]
-            , [Infix  (dbg "try parse and" >> reservedOpParser "&&" >> return pAnd) AssocRight]
-            , [Infix  (dbg "try parse or" >> reservedOpParser "||"  >> return pOr)  AssocRight]
+            , [Infix  (dbg "try parse &&" >> reservedOpParser "&&" >> return pAnd) AssocRight]
+            , [Infix  (dbg "try parse ||" >> reservedOpParser "||"  >> return pOr)  AssocRight]
             ]
 
+tableExpr ::  NameSpace m => [[Operator Text.Text PState m Expr]]
+tableExpr = [ [Infix  (dbg "try parse ^" >> op False "^") AssocRight]
+            , [Infix  (dbg "try parse *" >> op True "*") AssocLeft
+              ,Infix  (dbg "try parse /" >> op False "/") AssocLeft]
+            , [Infix  (dbg "try parse +" >> op True "+") AssocLeft
+              ,Infix  (dbg "try parse -" >> op False "-") AssocLeft]
+            , [Infix  (dbg "try parse :" >> op False ":") AssocRight]
+            , [Infix  (dbg "try parse ++" >> op True "++")  AssocRight]
+            ] where op assoc name = reservedOpParser name >> makeBinOp assoc name
+
+makeBinOp :: NameSpace m => Bool -> String -> Parser m (Expr -> Expr -> Expr)
+makeBinOp assoc name = do {
+  ; s <- getLSymbol name
+  ; op <- case s of {Just x -> return x; _ -> parserZero <?> "unknown operator "++name}
+  ; return (\x y -> Call (Sym op) (args op x++args op y))
+} where args op t@(Call (Sym o) a) = if o==op then a else [t]
+        args _ t = [t]
+
+vexprParser :: NameSpace m => Parser m Expr
+vexprParser = buildExpressionParser tableExpr atomExprParser
+
 -- | Parser of program expressions
-exprParser :: NameSpace m => Parser m PExpr
-exprParser =  dbg "parse expr" >> (
-              try (Val <$> aggrParser)
-          <|> try (Bool <$> boolParser)
-          <?> "expr")
+exprParser :: NameSpace m => Parser m Expr
+exprParser = dbg "parse expr" >> (
+                  try vexprParser
+              <|> try boolParser
+              <?> "expr")
 
 -- | Parser of where-statement
-whereParser :: NameSpace m => Bool -> Parser m PBool
+whereParser :: NameSpace m => Bool -> Parser m Expr
 whereParser ind = dbg "parse where" >> (
   do { dbg "before reservedParser where"
      ; when ind indented
@@ -353,39 +541,40 @@ whereParser ind = dbg "parse where" >> (
      ; dbg "where finished"
      ; return (foldr1 pAnd ts)
      }
-  <|> return (Const True))
+  <|> return (Bool True))
 
 -- | Parser of do-statement
-doParser :: NameSpace m => Parser m [ProgStmt]
+doParser :: NameSpace m => Parser m [Command]
 doParser = dbg "parse do" >> indentBlock (reservedParser "do"
                           >> many stmtParser)
                           <* reservedParserU "done"
 
-fragParser :: NameSpace m => Parser m PTerminal
+fragParser :: NameSpace m => Parser m Expr
 fragParser = dbg "parse fragment" >>  do
-  string "{<"
+  string "{<" >> whiteSpaceParser
   st <- getState
   putState st{ inFrag=True }
   res <- many stmtParser
-  string ">}"
-  putState st
-  return $ Frag res
+  string ">}" >> whiteSpaceParser
+  args <- extvars <$> getState
+  modifyState (\s -> s{ inFrag = inFrag st, extvars = extvars st })
+  return $ Call (FunDef (Var . snd <$> args) res) (Var . fst <$> args)
 
 nameParser:: NameSpace m => Parser m String
 nameParser = identifierParser >>= \name -> getLSymbol name >>= \case
   Just s  -> unexpected ("The identifier " ++ name ++ " is reserved as logical symbol.\n")
   Nothing -> return name
 
-caseParser :: NameSpace m => Parser m [(PVExpr, PBool, [ProgStmt])]
+caseParser :: NameSpace m => Parser m [(Expr, Expr, [Command])]
 caseParser = do
-  pts <- many1 . indentBlock $ liftM2 (,) aggrParser (option (Const True) (indentBlock $ whereParser False))
+  pts <- many1 . indentBlock $ liftM2 (,) (inpattern vexprParser) (option (Bool True) (indentBlock $ whereParser False))
   dbg "done cases, find do"
   common <- whereParser True
   doblock <- doParser
   return $ map (\(a,c) -> (a, pAnd c common, doblock)) pts
 
 -- | Parser of statements
-stmtParser :: NameSpace m => Parser m ProgStmt
+stmtParser :: NameSpace m => Parser m Command
 stmtParser = (dbg "parse statement " >> try (
          -- Parse an assigning instruction
 
@@ -400,20 +589,20 @@ stmtParser = (dbg "parse statement " >> try (
          <|> indentBlock (
              do { reservedParser "case"
                 ; dbg "case found"
-                ; e <- aggrParser
+                ; e <- inpattern vexprParser
                 ; dbg "case expression read"
                 ; reservedParser "of"
                 ; c <- whereParser True
                 ; dbg "start read cases"
-                ; cs <- mconcat <$> many1 caseParser -- liftM2 (,) aggrParser doParser
+                ; cs <- mconcat <$> many1 caseParser -- liftM2 (,) vexprParser doParser
                 ; return (Switch e c cs)
                 }
 
-          <|> (aggrParser >>= \p -> do{
-                (tp,g) <- (,) PMSelect <$> ((reservedOpParser "=" >> toList <$> aggrParser)
-                      <|> (reservedOpParser "<-" >> aggrParser))
-                      <|> (,) PMUnord <$> (reservedOpParser "=~" >> aggrParser)
-                      <|> (,) PMAppend . List <$> many1 (reservedOpParser "<<" >> aggrParser)
+          <|> (inpattern vexprParser >>= \p -> do{ -- ??? now we allow patterns in right part : [A, Var [_,Var [__]]] = [f [_, g[__]], B], where A,B,f,g are defined, Var must be defined by this expression
+                (tp,g) <- (,) Select <$> ((reservedOpParser "=" >> toList <$> inpattern vexprParser)
+                      <|> (reservedOpParser "<-" >> inpattern vexprParser))
+                      <|> (,) Unord <$> (reservedOpParser "~=" >> inpattern vexprParser)
+                      <|> (,) Append . List <$> many1 (reservedOpParser "<<" >> inpattern vexprParser)
                 ; c <- whereParser True
                 ; return (Assign tp p g c)
                 } <|>
@@ -425,10 +614,10 @@ stmtParser = (dbg "parse statement " >> try (
 
 -- | Program header parser
 headerParser :: NameSpace m => Parser m Header
-headerParser = try ( do { n <- nameParser
+headerParser = try ( do { Var n <- varParser
               ; vs <- many varParser
               ; reservedOpParser "="
-              ; return (Header n vs)
+              ; return (Header n $ map (\case { Var x -> x} ) vs)
               } )
 
 -- | Parser of programs
@@ -442,34 +631,34 @@ programParser = do
 -- Composing functions
 
 -- | Convert a program term to list of terms
-toList :: PVExpr -> PVExpr
+toList :: Expr -> Expr
 toList x = List [x]
 
 -- | Negate a given program term
-pNot :: PBool -> PBool
-pNot (Const x)    = Const (not x)
+pNot :: Expr -> Expr
+pNot (Bool x)    = Bool (not x)
 pNot (Not x)      = x
 pNot (Equal x y)  = NEqual x y
 pNot (NEqual x y) = Equal x y
 pNot x            = Not x
 
 -- | Take the logical and of given program terms
-pAnd :: PBool -> PBool -> PBool
-pAnd (Const True) y    = y
-pAnd x (Const True)    = x
-pAnd x@(Const False) y = x
-pAnd x y@(Const False) = y
+pAnd :: Expr -> Expr -> Expr
+pAnd (Bool True) y    = y
+pAnd x (Bool True)    = x
+pAnd x@(Bool False) y = x
+pAnd x y@(Bool False) = y
 pAnd (And xs) (And ys) = And (xs ++ ys)
 pAnd x (And ys)        = And (x : ys)
 pAnd (And xs) y        = And (xs ++ [y])
 pAnd x y               = And [x,y]
 
 -- | Take the logical or of given program terms
-pOr :: PBool -> PBool -> PBool
-pOr x@(Const True) y = x
-pOr x y@(Const True) = y
-pOr (Const False) y  = y
-pOr x (Const False)  = x
+pOr :: Expr -> Expr -> Expr
+pOr x@(Bool True) y = x
+pOr x y@(Bool True) = y
+pOr (Bool False) y  = y
+pOr x (Bool False)  = x
 pOr (Or xs) (Or ys)  = Or (xs ++ ys)
 pOr x (Or ys)        = Or (x : ys)
 pOr (Or xs) y        = Or (xs ++ [y])
