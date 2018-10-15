@@ -37,11 +37,11 @@ module Program
       NameSpace,
       Header(..),
       Program(..),
-      Command(..),
+      --Command(..),
       Program.Base,
       Program.Vars,
       Programs,
-      PAssign(..),
+      --PAssign(..),
       PVars,
       setPrograms,
       setPVars
@@ -66,65 +66,12 @@ import           Utils
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
--- | type of assignment statement
-data PAssign
-  = Select -- ^ match patterns with list elements (l1,...,lN <- right)
-  | Unord  -- ^ match list pattern with list of elements in any order (left ~= right)
-  | Append -- ^ appends right part to variable (left << right)
-  deriving (Eq, Ord)
-
-instance Show PAssign where
-  show Select = " <- "
-  show Unord  = " ~= "
-  show Append = " << "
-
 data Header = Header
   {
-    name :: LSymbol,
-    args :: [Var]
+    name      :: PVar,
+    arguments :: [PVar]
   }
   deriving (Eq, Ord,Show)
-
--- | Type of program statement
-data Command
-
-  -- | Assigning instruction iterates terms with respect to a given condition
-  --   and assigns them to a given program variable
-  = Assign
-    {
-      assign    :: PAssign, -- ^ type of pattern matching in assignment
-      pattern_  :: PExpr,   -- ^ assigned pattern
-      generate  :: PExpr,   -- ^ generator of list of terms
-      condition :: PBool    -- ^ condition for iterating of terms
-    }
-
-  -- | Branching instruction jumps to a given program fragment
-  --   with respect to a given condition
-  | Branch
-    {
-      condition :: PBool,   -- ^ condition for the branch
-      branch    :: [Command]  -- ^ branch to program fragment
-    }
-
-  -- | Switching instruction jumps to a program fragment defined by a given expression
-  | Switch
-    {
-      expression :: PExpr,              -- ^ expression
-      condition  :: PBool,              -- ^ condition for switching
-      cases      :: [(PExpr, PBool, [Command])] -- ^ list of cases (p,c,f), where
-                                                -- p is a pattern of the case
-                                                -- c is a condition of the case
-                                                -- f is a list of commands of the case
-    }
-
-  -- | Acting instruction performs a given action with respect to a given condition
-  | Action
-    {
-      action    :: PExpr,  -- ^ action
-      condition :: PBool   -- ^ condition of action
-    }
-
-  deriving (Eq,Ord,Show)
 
 -- | Type of program : header + command list
 data Program
@@ -195,18 +142,18 @@ class Monad m => Vars m where
     in return x
 
   -- | Get a program variable by its name
-  getPVarIfExist :: String -> m (Maybe PTerminal)
-  getPVarIfExist name = getPVars >>= \db -> return $ X <$> M.lookup name (numbers db)
+  getPVarIfExist :: String -> m (Maybe Expr)
+  getPVarIfExist name = getPVars >>= \db -> return $ Var <$> M.lookup name (numbers db)
 
   -- | Get a program variable by its name
-  getPVar :: String -> m PTerminal
+  getPVar :: String -> m Expr
   getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
-    Just n  -> return (X n)
+    Just n  -> return (Var n)
     Nothing -> let n = curNum db
                    new_db = PVars (listArray (1,n) (name : elems (names db)))
                                   (M.insert name n (numbers db))
                                   (n + 1)
-               in setPVars new_db >> return (X n)
+               in setPVars new_db >> return (Var n)
 
 -- | Class for namespace of logical symbols and program variables
 class (LSymbol.Base m, Program.Vars m) => NameSpace m

@@ -5,13 +5,18 @@ f arg thrm =
       case thrm of
         forall [boundVariables vars, premises prems, conclusion [concl]] where vars eq thrm
         do
-          h [x, y] = concl
+          h [plus [_, x]] | h [x] = concl
             where
               h in [equality, equivalence]
               x eq y
-          Efgh = x
-          Abcd = h
-          x_header [equality [a&(plus [p&x1, x2]), b@(plus [x3, x1])]] <- x
+          Efgh = f` x y
+          Abcd = h` (y` abcd)
+          Identification << (\list__ b__ -> 
+              describe = type
+              concat` b__ other ~= list__` 
+          )` list b
+          G = case g` t of {f [a, b] -> g [b, a]; [__, c] -> g [e, c]; _ g -> g; _ -> s}
+          x_header [equality [a&(plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
         done
     done
 done
