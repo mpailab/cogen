@@ -4,17 +4,13 @@
 
 {-|
 Module      : Expr
-Description : Data types of expressions
+Description : Data types of expressions in the language Coral
 Copyright   : (c) Grigoriy Bokov, 2018
                   Gleb Kalachev, 2018
 License     : GPL-3
 Maintainer  : bokov@intsys.msu.ru
 Stability   : experimental
 Portability : POSIX
-
-Expressions are built up from terminal expressions using brackets, braces, commas, alternating, logical terms etc. Terminal expressions are defined outside. As an example, terminal expressions are logical symbols, program variables, function's calls, pointers, referenses.
-
-There are two classes of expressions: logical and program. Logical expressions represent logical terms that are elements of inner language of the system. Program expressions represent program terms that are elements of outer language of the system. The type @Expr@ is used for denoting common parts of logical and program expressions.
 -}
 module Expr
     (
@@ -38,41 +34,9 @@ import           Term
 -- Data types and clases declaration
 
 type Var = Int
-type Args = M.Map Var Expr
-
-class Function m a b where
-  apply :: (Args -> m a) -> [(Var,Expr)] -> [Var] -> b
-
-instance Monad m => Function m a (m a) where
-  apply f args [] = f (M.fromList args)
-
-instance (Monad m, Function m a b) => Function m a (Expr -> b) where
-  apply f args (x:xs) a = apply f ((x,a):args) xs
-
-type FExpr = forall m a . (Monad m, Function m Expr a) => a
--- type FExpr = forall m . Monad m => [Expr] -> m Expr
-type SExpr = forall m a . (Monad m, Function m () a) => a
--- type SExpr = forall m . Monad m => Expr -> m ()
 type TExpr = Term Expr
 
-newtype Func = Func FExpr
-newtype SFunc = SFunc SExpr  -- ^ expression together with a swap-function
-
-instance Eq Func where
-  (==) a b = error "comparison between functions not allowed"
-instance Ord Func where
-  (<=) a b = error "comparison between functions not allowed"
-instance Show Func where
-  show a = error "cannot show compiled function"
-
-instance Eq SFunc where
-  (==) a b = error "comparison between swap functions not allowed"
-instance Ord SFunc where
-  (<=) a b = error "comparison between swap functions not allowed"
-instance Show SFunc where
-  show a = error "cannot show swap function"
-
--- | Type of expression with a type of terminal expressions @a@
+-- | Type of expressions
 data Expr
 
   -- Simple expressions:
@@ -108,67 +72,63 @@ data Expr
   | Set   [Expr]               -- ^ set of expressions
 
   -- Functional expressions:
-  | Call Expr [Expr]  -- ^ partial function call
-  | FunDef [Expr] [Command] -- ^ function definiton
-  | Fun  Func           -- ^ function over expressions
-
-  -- Overloaded expressions:
-  | Swap Expr SFunc  -- ^ expression together with a swap-function
+  | Call Expr  [Expr]    -- ^ partial function call
+  | Fun [Expr] [Command] -- ^ partial function definiton
 
   -- Undefined expression:
   | NONE
 
   deriving (Eq, Ord, Show)
 
--- | type of assignment statement
-data PAssign
-  = Select -- ^ match patterns with list elements (l1,...,lN <- right)
+-- | type of assigning
+data Assign
+  = Simple
+  | Select -- ^ match patterns with list elements (l1,...,lN <- right)
   | Unord  -- ^ match list pattern with list of elements in any order (left ~= right)
   | Append -- ^ appends right part to variable (left << right)
   deriving (Eq, Ord)
 
-instance Show PAssign where
+instance Show Assign where
+  show Simple = " = "
   show Select = " <- "
   show Unord  = " ~= "
   show Append = " << "
 
--- | Type of program statement
+-- | Type of commands
 data Command
 
-  -- | Assigning instruction iterates terms with respect to a given condition
-  --   and assigns them to a given program variable
+  -- | Assign values to undefined variables
   = Assign
     {
-      assign    :: PAssign, -- ^ type of pattern matching in assignment
-      pattern_  :: Expr,   -- ^ assigned pattern
-      generate  :: Expr,   -- ^ generator of list of terms
-      condition :: Expr    -- ^ condition for iterating of terms
+      type  :: Assign, -- ^ type of assigning
+      left  :: Expr,   -- ^ left part of assigning
+      right :: Expr,   -- ^ right part of assigning
+      cond  :: Expr    -- ^ condition of assigning
     }
 
-  -- | Branching instruction jumps to a given program fragment
-  --   with respect to a given condition
+  -- | Branch to a commands sequence
   | Branch
     {
-      condition :: Expr,   -- ^ condition for the branch
-      branch    :: [Command]  -- ^ branch to program fragment
+      cond   :: Expr,      -- ^ condition of branching
+      branch :: [Command]  -- ^ commands sequence
     }
 
-  -- | Switching instruction jumps to a program fragment defined by a given expression
+  -- | Switch to a commands sequence
   | Switch
     {
-      expression :: Expr,              -- ^ expression
-      condition  :: Expr,              -- ^ condition for switching
-      cases      :: [(Expr, Expr, [Command])] -- ^ list of cases (p,c,f), where
-                                                -- p is a pattern of the case
-                                                -- c is a condition of the case
-                                                -- f is a list of commands of the case
+      expr  :: Expr,              -- ^ expression of switching
+      cond  :: Expr,              -- ^ condition of switching
+      cases :: [(Expr, Expr, [Command])] -- ^ list of cases (p,c,f), where
+                                         -- ^ p is a pattern of the case
+                                         -- ^ c is a condition of the case
+                                         -- ^ f is a commands sequence of the case
     }
 
-  -- | Acting instruction performs a given action with respect to a given condition
-  | Action
+  -- | Apply a function
+  | Apply
     {
-      action    :: Expr,  -- ^ action
-      condition :: Expr   -- ^ condition of action
+      func :: Expr,  -- ^ function
+      cond :: Expr   -- ^ condition of applying
     }
 
-  deriving (Eq,Ord,Show)
+  deriving (Eq, Ord, Show)

@@ -35,23 +35,25 @@ import Expr
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
+class Handler m a where
+  handle :: Expr -> a
+
+instance Monad m => Handler m (m Expr) where
+  handle e = evalState (eval e) (Info M.empty)
+
+instance (Monad m, Handler m a) => Handler m (Expr -> a) where
+  handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x a NONE
+                               in handle (Fun xs (cmd:cmds))
+
+type Args = M.Map Var Expr
+
 data Info = Info
   {
-    args :: Args,
-    swap :: SExpr
+    args :: Args
+    -- swap :: SExpr
   }
 
--- type Handler m a = StateT Info m (Args -> (a, Args))
 type Handler m a = StateT Info m a
-
--- handle :: (Monad m, Function a) => Program -> m a
--- handle (Program (Header name args) cs) =
---   let f = execState (run cs) (Info (M.fromList $ zip args args) M.empty)
---   in return (apply f [] args)
-
-handle :: (Monad m, Function m a b) => Program -> b
-handle (Program (Header name vars) cs) =
-  apply (\x -> execState (run cs) (Info x M.empty return)) [] vars
 
 ------------------------------------------------------------------------------------------
 -- Functions
@@ -66,7 +68,7 @@ setVal x v = modify (\info -> info {args = M.insert x v (args info)})
 -- swapArg x y = modify (\info -> info {args = M.insert x y (args info)})
 
 
-eval :: Monad m => Expr -> Handler m Expr
+eval :: Monad m => Expr -> Handler m Func
 
 eval (Var i) = getArg i >>= \case
   Just x  -> return x
