@@ -9,8 +9,14 @@ f arg thrm =
             where
               h in [equality, equivalence]
               x eq y
+          f = \x y -> 
+              concat` x y
+
           Efgh = f` x y
-          Abcd = h` (y` abcd)
+          c = (\x -> 
+              f` (x x)
+          )` [a, b, c]
+          Abcd = (if a then h else f)` (y` abcd)
           Identification << (\list__ b__ -> 
               describe = type
               concat` b__ other ~= list__` 
