@@ -40,8 +40,8 @@ class NameSpace m => ProgWriter m where
   setIndent :: Int -> m ()
   inci :: m ()
   deci :: m ()
-  inci = getIndent >>= \ind -> (echo ("increase indent"++show ind) >> setIndent (ind+1))
-  deci = getIndent >>= \ind -> (echo ("decrease indent"++show ind) >> setIndent (ind-1))
+  inci = getIndent >>= \ind -> echo ("increase indent"++show ind) >> setIndent (ind+1)
+  deci = getIndent >>= \ind -> echo ("decrease indent"++show ind) >> setIndent (ind-1)
 
   indent :: m String
   indent = getIndent >>= writeIndent
@@ -71,7 +71,7 @@ class Write a where
   writeI :: ProgWriter m => Bool -> a -> m String
 
   write :: NameSpace m => a -> m String
-  write x = evalStateT wrI 0 >>= return
+  write x = evalStateT wrI 0
             where wrI :: NameSpace m => SimpleWriter m String
                   wrI = writeI False x
 
@@ -87,26 +87,25 @@ instance Write Expr where
   writeI _ (Bool x) = return $ show x
   writeI par (Term t) = writeI par t
   writeI _ (Var n) = writeVar n
-  writeI _ (BVar n) = writeVar n
   writeI _ (Sym s) = nameLSymbol s
   writeI _ Any = return "_"
   writeI _ AnySeq = return "__"
   writeI par (Call h args) = inpars par $
                   writeI True h +<>+ "` " +>+ (unwords <$> mapM (writeI True) args)
-  
+
   writeI par (IfElse cond iftrue iffalse) = inpars par $
                   "if " +>+ writeI False cond +<>+
                   " then " +>+ writeI False iftrue +<>+
                   " else " +>+ writeI True iffalse
-  
+
   writeI par (CaseOf pat cases) = inpars par $
                   "case " +>+ writeI False pat +<>+ " of {" +>+
                   writeSequenceS "; " cases (\(pat,res) -> writeI False pat +<>+ " -> " +>+ writeI False res)
                   +<+ "}"
-  
+
   writeI par (Alt vars) = inpars par $ writeSequenceS " | " vars write0
-  
-  writeI par (FunDef args cmds) = inpars par $ "\\" +>+ 
+
+  writeI par (Fun args cmds) = inpars par $ "\\" +>+
                   writeSequenceS " " args (writeI True) +<>+ " -> \n" +>+ indented0 (
                     writeSequenceS "" cmds (indented write0)
                   ) +<>+ if par then indent else return ""
@@ -135,32 +134,32 @@ instance Write TExpr where
   writeI par (x :>> y) = inpars par $ writeI True x +<>+ " " +>+ writeI True y
 
 
-instance Write Command where 
+instance Write Command where
   writeI _ (Assign Select pat (List [val]) cond) =
     indent +<>+ write0 pat +<>+ " = " +>+ write0 val +<>+ writeWhereCond cond
-  
+
   writeI _ (Assign Append pat (List frags) cond) =
       indent +<>+ write0 pat +<>+ writeSequenceS "" frags (\f -> show Append +>+ write0 f) +<>+ writeWhereCond cond
-    
+
   writeI _ (Assign tp pat gen cond) =
     indent +<>+ write0 pat +<>+ show tp +>+ write0 gen +<>+ writeWhereCond cond
-  
+
   -- | Write a branching instruction of program fragment corresponding to a given indent
   writeI _ (Branch cond br) =
     indent +<>+ "if " +>+ write0 cond +<>+ "\n" +>+
     indent +<>+ "do\n" +>+
     writeProgTail br
-  
+
   -- | Write a switching instruction of program fragment corresponding to a given indent
   writeI _ (Switch expr cond cs) =
     indent +<>+ "case " +>+ write0 expr +<>+ " of" +>+
     writeWhereCond cond +<>+
     indented writeSwitchCases cs
-  
+
   -- | Write an acting instruction of program fragment corresponding to a given indent
-  writeI _ (Action act cond) =
+  writeI _ (Apply act cond) =
     indent +<>+ write0 act +<>+ writeWhereCond cond
-  
+
 write0 :: (Write t, ProgWriter m) => t -> m String
 write0 = writeI False
 ------------------------------------------------------------------------------------------
@@ -174,8 +173,8 @@ writeVar n = namePVar n >>= \case
 
 -- | Write sequence
 writeSequenceS :: NameSpace m => String -> [a] -> (a -> m String) -> m String
-writeSequenceS _ [] wr = return ""
-writeSequenceS _ [x] wr    = wr x
+writeSequenceS _ [] wr       = return ""
+writeSequenceS _ [x] wr      = wr x
 writeSequenceS sep (x:xs) wr = wr x +<>+ sep +>+ writeSequenceS sep xs wr
 
 -- | Write sequence

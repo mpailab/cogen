@@ -66,12 +66,10 @@ import           Utils
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-type PVar = Int
-
 data Header = Header
   {
-    name      :: PVar,
-    arguments :: [PVar]
+    name      :: Var,
+    arguments :: [Var]
   }
   deriving (Eq, Ord,Show)
 

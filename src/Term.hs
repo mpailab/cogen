@@ -30,9 +30,9 @@ import           Data.Char
 -- Internal imports
 
 data Term a = T a
-            | a :> [Term a]
-            | a :>> a
-            deriving (Eq, Ord, Show)
+              | a :> [Term a]
+              | a :>> a
+              deriving (Eq, Ord, Show)
 
 instance Foldable Term where
   foldMap f (T x)     = f x
