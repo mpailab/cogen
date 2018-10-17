@@ -481,7 +481,7 @@ relationParser = inpattern vexprParser >>= \left ->
                      ; return (In left set)
                      }
               <|> case left of
-                    (Var n) -> return (BVar n) -- global variable
+                    (Var n) -> return (Var n)
                     _ -> parserZero
               <?> "relation"
 

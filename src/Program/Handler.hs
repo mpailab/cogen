@@ -1,4 +1,4 @@
-c{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
@@ -35,21 +35,21 @@ import Expr
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-class Handler m a where
+class Handle a where
   handle :: Expr -> a
 
-instance Monad m => Handler m (m Expr) where
+instance Handle Expr where
   handle e = evalState (eval e) (Info M.empty)
 
-instance (Monad m, Handler m a) => Handler m (Expr -> a) where
-  handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x a NONE
+instance Handle a => Handle (Expr -> a) where
+  handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x e NONE
                                in handle (Fun xs (cmd:cmds))
 
-type Args = M.Map Var Expr
+type Values = M.Map Var Expr
 
 data Info = Info
   {
-    args :: Args
+    vals :: Values
     -- swap :: SExpr
   }
 
@@ -58,25 +58,25 @@ type Handler m a = StateT Info m a
 ------------------------------------------------------------------------------------------
 -- Functions
 
-getArg :: Monad m => Var -> Handler m (Maybe Expr)
-getArg x = get >>= M.lookup x args
+getVal :: Monad m => Var -> Handler m (Maybe Expr)
+getVal x = get >>= \info -> return (M.lookup x (vals info))
 
 setVal :: Monad m => Int -> Expr -> Handler m ()
-setVal x v = modify (\info -> info {args = M.insert x v (args info)})
+setVal x v = modify (\info -> info {vals = M.insert x v (vals info)})
 
 -- swapArg :: Monad m => Int -> Expr -> Handler m ()
 -- swapArg x y = modify (\info -> info {args = M.insert x y (args info)})
 
 
-eval :: Monad m => Expr -> Handler m Func
+eval :: Monad m => Expr -> Handler m Expr
 
-eval (Var i) = getArg i >>= \case
+eval (Var i) = getVal i >>= \case
   Just x  -> return x
   Nothing -> error "Evaluating error: a program variable is not initialized.\n"
 
 eval (Ptr _ _) = error "Evaluating error: can't take a pointer in the evaluating mode. Try take a reference x@(...).\n"
 
-eval (Ref i e) = eval e >>= \x -> setArg i >> return x
+eval (Ref i e) = eval e >>= \x -> setVal i x >> return x
 
 eval x@(Sym _) = return x
 
@@ -86,24 +86,24 @@ eval Any = error "Evaluating error: can't evaluate any expression.\n"
 
 eval AnySeq = error "Evaluating error: can't evaluate any sequence of expressions.\n"
 
-eval x@(Const _) = return x
+eval x@(Bool _) = return x
 
-eval (Equal x y) = Const <$> liftM2 (==) (eval x) (eval y)
+eval (Equal x y) = Bool <$> liftM2 (==) (eval x) (eval y)
 
-eval (NEqual x y) = Const <$> liftM2 (!=) (eval x) (eval y)
+eval (NEqual x y) = Bool <$> liftM2 (/=) (eval x) (eval y)
 
 eval (In x y) = eval x >>= \ex -> eval y >>= \case
-  (Alt   ey) -> return (elem ex ey)
-  (Tuple ey) -> return (elem ex ey) -- tuples are handled as lists
-  (List  ey) -> return (elem ex ey)
-  (Set   ey) -> return (elem ex ey) -- sets are handled as lists
+  (Alt   ey) -> return (Bool (elem ex ey))
+  (Tuple ey) -> return (Bool (elem ex ey)) -- tuples are handled as lists
+  (List  ey) -> return (Bool (elem ex ey))
+  (Set   ey) -> return (Bool (elem ex ey)) -- sets are handled as lists
   _          -> error "Evaluating error: a wrong in-expression.\n"
 
 eval (Not x) = Bool <$> Prelude.not <$> (evalB x)
 
-eval (And xs) = Bool <$> (foldrM (\y -> return . (y &&)) True) <$> mapM evalB xs
+eval (And xs) = Bool <$> (foldr (\y -> (y &&)) True) <$> mapM evalB xs
 
-eval (Or xs) = Bool <$> (foldrM (\y -> return . (y ||)) False) <$> mapM evalB xs
+eval (Or xs) = Bool <$> (foldr (\y -> (y ||)) False) <$> mapM evalB xs
 
 eval (IfElse c t f) = evalB c >>= \case
   True  -> eval t
@@ -111,11 +111,11 @@ eval (IfElse c t f) = evalB c >>= \case
 
 eval (CaseOf e []) = error "Evaluating error: can't evaluate an empty case-expression.\n"
 eval (CaseOf e ((p,c):cs)) = ident e p >>= \case
-  True  -> eval c
-  False -> eval (CaseOf e cs)
+  NONE      -> eval (CaseOf e cs)
+  otherwise -> eval c
 
 eval (Term (T x)) = Term <$> T <$> eval x
-eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x) (mapM eval xs)
+eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x) (map (\(Term t) -> t) <$> (mapM eval (map Term xs)))
 
 eval (Alt xs)   = Alt   <$> mapM eval xs
 
@@ -125,112 +125,117 @@ eval (List xs)  = List  <$> mapM eval xs
 
 eval (Set xs)   = Set   <$> mapM eval xs
 
+eval (Call (Var i) as) = getVal i >>= \f -> eval (Call f as)
+eval (Call (Fun [] cs) []) = run cs
+eval (Call (Fun (x:xs) cs) (a:as)) = let c = Assign Simple x a NONE
+                                     in eval (Call (Fun xs (c:cs)) as)
+eval (Call e as) = return e
+
+eval (Fun _ _) = error "Evaluating error: can't evaluate a function definition.\n"
+
+eval NONE = error "Evaluating error: can't evaluate an undefined expression.\n"
+
 evalB :: Monad m => Expr -> Handler m Bool
 evalB e = eval e >>= \case
   Bool c -> return c
   _      -> error "Evaluating error: a wrong Boolean expression.\n"
 
-ident :: Monad m => Expr -> Expr -> Handler m Bool
+ident :: Monad m => Expr -> Expr -> Handler m Expr
 
-ident (Alt xs) y = f (\x -> ident x y) xs
-ident x (Alt ys) = f (ident x) ys
+ident (Alt xs) y = identOr (\x -> ident x y) xs
+ident x (Alt ys) = identOr (ident x) ys
 
-ident (Var i) y = getArg i >>= \case
-  Just x  -> setSwap (swapAssignment i) >> ident x y
-  Nothing -> eval y >>= setAssignment i >> return True
+ident Any y = return y
+ident x Any = return x
 
-ident x (Var i) = getAssignment i >>= \case
-  Just y  -> setSwap (swapAssignment i) >> ident x y
-  Nothing -> eval x >>= setAssignment i >> return True
+ident (Var i) y = getVal i >>= \case
+  Just x  -> ident x y
+  Nothing -> setVal i y >> return True
+
+ident x (Var i) = getVal i >>= \case
+  Just y  -> ident x y
+  Nothing -> setVal i x >> return True
 
 ident (Ptr i x) y = ident x y >>= \case
-  True  -> eval y >>= \e ->
-           getSwap >>= \sw ->
-           setAssignment i (Swap e sw) >> return True
-  False -> return False
+  NONE -> return NONE
+  e    -> setVal i e >> return e
 
 ident x (Ptr i y) = ident x y >>= \case
-  True  -> eval x >>= \e ->
-           getSwap >>= \sw ->
-           setAssignment i (Swap e sw) >> return True
-  False -> return False
+  NONE -> return NONE
+  e    -> setVal i e >> return e
 
 ident (Ref i x) y = ident x y >>= \case
-  True  -> eval y >>= setAssignment i >> return True
-  False -> return False
+  NONE -> return NONE
+  e    -> setVal i e >> return e
 
 ident x (Ref i y) = ident x y >>= \case
-  True  -> eval x >>= setAssignment i >> return True
-  False -> return False
+  NONE -> return NONE
+  e    -> setVal i e >> return e
 
 ident (IfElse c t f) y = eval c >>= \case
   Bool True  -> ident t y
   Bool False -> ident f y
-  otherwise  -> return False
+  otherwise  -> return NONE
 
 ident x (IfElse c t f) = eval c >>= \case
   Bool True  -> ident x t
   Bool False -> ident x f
-  otherwise  -> return False
+  otherwise  -> return NONE
 
-ident (CaseOf e []) y = return False
+ident (CaseOf e []) y = return NONE
 ident (CaseOf e ((p,x):cs)) y = ident e p >>= \case
-  True  -> ident x y
-  False -> ident (CaseOf e cs) y
+  NONE      -> ident (CaseOf e cs) y
+  otherwise -> ident x y
 
-ident x (CaseOf e []) = return False
+ident x (CaseOf e []) = return NONE
 ident x (CaseOf e ((p,y):cs)) = ident e p >>= \case
-  True  -> ident x y
-  False -> ident x (CaseOf e cs)
+  NONE      -> ident x (CaseOf e cs)
+  otherwise -> ident x y
 
-ident (Swap x sw) y = setSwap sw >> ident x y
-ident x (Swap y sw) = setSwap sw >> ident x y
+ident x@(Call _ _) y = eval x >>= \e -> ident e y
+ident x y@(Call _ _) = eval y >>= \e -> ident x e
 
-ident (Call n args) y = getFun n >>= \f -> f <$> mapM eval args >>= \e -> ident e y
-ident x (Call n args) = getFun n >>= \f -> f <$> mapM eval args >>= \e -> ident x e
+ident (Sym x) (Sym y) = if x == y then return (Sym x) else return NONE
 
-ident (Sym x) y = eval y >>= \case
-  Sym s -> return (s == x)
-  _     -> return False
+ident (Int x) (Int y) = if x == y then return (Int x) else return NONE
 
-ident x (Sym y) = eval x >>= \case
-  Sym s -> return (s == y)
-  _     -> return False
+ident (Term (T x)) (Term (T y)) = Term <$> T <$> ident x y
+ident (Term (T x))   y@(Term _) = ident x y
+ident   x@(Term _) (Term (T y)) = ident x y
+ident (Term (x :> xs)) (Term (y :> ys)) =
+  ident (List (x : map Term xs)) (List (y : map Term ys)) >>= \(List (e:es)) ->
+  return (Term (e :> map (\(Term t) -> t) es))
 
-ident (Int x) y = eval y >>= \case
-  Int i -> return (i == x)
-  _     -> return False
+ident (Tuple xs) (Tuple ys) = Tuple <$> identAnd xs ys
 
-ident x (Int y) = eval x >>= \case
-  Int i -> return (i == y)
-  _     -> return False
+ident (List xs) (List ys) = List <$> identAnd xs ys
 
-ident Any _ = return True
-ident _ Any = return True
+ident (Set xs) (Set ys) = Set <$> identAnd xs ys
 
-ident (Term (T x)) (Term (T y)) = ident x y
-ident (Term (T x)) (Term y) = eval x >>= \case
-  Term t    -> ident t y
-  otherwise -> return False
-ident (Term x) (Term (T y)) = eval y >>= \case
-  Term t    -> ident x t
-  otherwise -> return False
-ident (Term (x :> xs)) (Term (y :> ys)) = ident (List (x:xs)) (List (y:ys))
+ident _ _ = error "Identifying error: An unsupported identification.\n"
 
-ident (Tuple xs) (Tuple ys) = g xs ys
+identOr x [] = NONE
+identOr x (y:ys) = ident x y >>= \case
+  NONE -> identOr x ys
+  e    -> return e
 
-ident (List xs) (List ys) = g xs ys
-
-ident (Set xs) (Set ys) = g xs ys
-
-ident _ _ = error "Error: An unsupported identification.\n"
-
-where
-  f x ys  = mapM x ys >>= foldrM (\z -> return . (z ||)) False
-  g xs ys = zipWithM ident xs ys >>= foldrM (\z -> return . (z &&)) True
+identAnd [] [] = return []
+identAnd [] _  = error "Identifying error: can't identify lists with different lengths.\n"
+identAnd _  [] = error "Identifying error: can't identify lists with different lengths.\n"
+identAnd (x:xs) (y:ys) = ident x y >>= \case
+  NONE -> return NONE
+  e    -> identAnd xs ys >>= \es -> return (e:es)
 
 -- | Run a list of commands
-run :: Monad m => [Command] -> Handler m LExpr
+run :: Monad m => [Command] -> Handler m Expr
+
+run ((Assign Simple l r c) : cmds) = do
+  state <- get
+  ident l r >>= \case
+    NONE -> put state >> return NONE
+    e    -> evalB c >>= \case
+      True  -> run cmds >>= \case {NONE -> return e; x -> return x}
+      False -> put state >> return NONE
 
 -- Handle an assignment command of the form 'p <- g | c', where
 --  p is a program expression denoting a list of patterns;
@@ -249,33 +254,45 @@ run :: Monad m => [Command] -> Handler m LExpr
 -- 2. if n = 0, eval c;
 -- 3. handle '[p1,...,pn] <- [g2,...,gm] | c'.
 --
-run ((Assign Select p g c) : cs) =
-  case p of
-    List ps -> case g of
-      List gs   -> f ps gs
-      otherwise -> eval g >>= \case
-        (List gs) -> f ps gs
+run ((Assign Select l r c) : cs) =
+  case l of
+    List ls -> case r of
+      List rs   -> g ls rs
+      otherwise -> eval r >>= \case
+        (List rs) -> g ls rs
         _         -> error "Unsupported value in a Select-assignment command\n"
     otherwise -> error "Unsupported pattern in a Select-assignment command\n"
   where
     f :: [Expr] -> [Expr] -> Handler m Expr
     f [] _ = do
       -- check the condition
-      cond <- evalB c
-      -- run the next commands if necessary
-      when cond (run cs)
+      evalB c >>= \case
+        -- run the next commands
+        True  -> run cs >>= \case {NONE -> return (List [NONE]); x -> return x}
+        False -> return NONE
 
-    f (x:xs) (y:ys) = when (length ps <= length gs) do
-      -- save current state of Handler
-      state <- get
-      -- identify the first pattern with the first value
-      is_match <- ident x y
-      -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> f xs ys)
-      -- restore current state of Handler
-      put state
-      -- identify the list of patterns with the tail of values
-      f (x:xs) ys
+    f (x:xs) (y:ys) = do
+      if (length xs <= length ys) then do
+        -- save current state of Handler
+        state <- get
+        -- identify the first pattern with the first value
+        ident x y >>= \case
+          -- restore current state of Handler and
+          -- identify the list of patterns with the tail of values
+          NONE -> put state >> return f (x:xs) ys
+          -- continue the identification of remaining patterns
+          e    -> f xs ys >>= \case
+            -- restore current state of Handler
+            NONE -> put state >> return NONE
+            List (NONE:es) -> return (List (NONE:e:es))
+            x -> return x
+      else
+        return NONE
+
+    g :: [Expr] -> [Expr] -> Handler m Expr
+    g xs ys = f xs ys >>= \case
+      List (NONE:es) -> return (List es)
+      x -> return x
 
 -- Handle an assignment command of the form 'p ~= g | c', where
 --  p is a program expression denoting a list of patterns;
@@ -294,52 +311,75 @@ run ((Assign Select p g c) : cs) =
 -- 4. if n = 0, eval c;
 -- 5. handle '[p1,...,pn] ~= [g2,...,gm,g1] | c'.
 --
-run ((Assign Unord p g c) : cs) =
-  eval p >>= \case
-    (List ps) -> (eval g >>= \case
-      (List gs) -> when (length ps <= length gs + 1) (f ps gs (length gs))
-      _         -> error "Unsupported value in PMUnord assignment command")
-    _         -> error "Unsupported pattern in PMUnord assignment command"
+run ((Assign Unord l r c) : cs) =
+  case l of
+    List ls -> case r of
+      List rs   -> g ls rs
+      otherwise -> eval r >>= \case
+        (List rs) -> g ls rs
+        _         -> error "Unsupported value in a Unord-assignment command\n"
+    otherwise -> eval l >>= \case
+      List ls -> case r of
+        List rs   -> g ls rs
+        otherwise -> eval r >>= \case
+          (List rs) -> g ls rs
+          _         -> error "Unsupported value in a Unord-assignment command\n"
+      otherwise -> error "Unsupported pattern in a Unord-assignment command\n"
   where
+    f :: [Expr] -> [Expr] -> Int -> Handler m Expr
     f [] [] 0 = do
       -- check the condition
-      cond <- evalB c
-      -- run the next commands if necessary
-      when cond (run cs)
-
-    f _ _ 0 = return
+      evalB c >>= \case
+      -- run the next commands
+        True  -> run cs >>= \case {NONE -> return (List [NONE]); x -> return x}
+        False -> return NONE
 
     f [Ref i AnySeq] ys n = do
-      -- assign a program variable with the number i the list ys
-      ident (Var i) (List ys)
       -- check the condition
-      cond <- evalB c
-      -- run the next commands if necessary
-      when cond (run cs)
+      evalB c >>= \case
+        True  -> do
+          -- assign a program variable with the number i the list ys
+          setVal i (List ys)
+          -- run the next commands
+          run cs >>= \case {NONE -> return (List [NONE]); x -> return x}
+        False -> return NONE
 
     f (z@(Ref i AnySeq):x:xs) (y:ys) n = do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the first value
-      is_match <- ident x y
-      -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> f (z:xs) ys (length ys))
-      -- restore current state of Handler
-      put state
-      -- identify the list of patterns with the shifted values
-      f (z:x:xs) (ys ++ [y]) (n-1)
+      ident x y >>= \case
+        -- restore current state of Handler and
+        -- identify the list of patterns with the shifted values
+        NONE -> put state >> f (z:x:xs) (ys ++ [y]) (n-1)
+        -- continue the identification of remaining patterns
+        otherwise -> f (z:xs) ys (length ys) >>= \case
+          -- restore current state of Handler
+          NONE -> put state >> return NONE
+          x -> return x
 
     f (x:xs) (y:ys) n = do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the first value
-      is_match <- ident x y
-      -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> f xs ys (length ys))
-      -- restore current state of Handler
-      put state
-      -- identify the list of patterns with the shifted values
-      f (x:xs) (ys ++ [y]) (n-1)
+      ident x y >>= \case
+        -- restore current state of Handler and
+        -- identify the list of patterns with the shifted values
+        NONE -> put state >> f (x:xs) (ys ++ [y]) (n-1)
+        -- continue the identification of remaining patterns
+        otherwise -> f xs ys (length ys) >>= \case
+          -- restore current state of Handler
+          NONE -> put state >> return NONE
+          x -> return x
+
+    f _ _ 0 = return NONE
+
+    g :: [Expr] -> [Expr] -> Handler m Expr
+    g xs ys = do
+      let n = length ys
+      if length xs <= n + 1
+        then f xs ys n >>= \case {List [NONE] -> return r; x -> return x}
+        else return NONE
 
 -- Handle an assignment command of the form 'p << g | c', where
 --  p is a program variable whose values are lists of logical expressions;
@@ -353,12 +393,18 @@ run ((Assign Unord p g c) : cs) =
 --
 -- We handle a command 'p << g | c' as follows. First, we eval p as a list of logical expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and c as a logical constant C. If C is true, we assign p the new value [p1,...,pn,g1,...,gm].
 --
-run ((Assign Append p g c) : cs) = do
-  cond <- evalB c
-  when cond (isAssigned p >>= \case
-    True  -> liftM2 (++) (eval p) (eval g)
-    False -> assign p <$> (eval g))
-  run cs
+run ((Assign Append (Var i) (List rs) c) : cs) = do
+  -- check the condition
+  evalB c >>= \case
+    True  -> do
+      mb_val <- getVal i
+      val <- case mb_val of
+        Just (List ls) -> return (List (ls ++ rs))
+        Nothing -> return r
+      setVal i val
+      -- run the next commands
+      run cs >>= \case {NONE -> return val; x -> return x}
+    False -> return NONE
 
 -- Handle a branch command of the form:
 -- if c
@@ -394,19 +440,22 @@ run ((Switch e c i) : cs) = do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the logical expression
-      is_match <- ident ip expr
-      -- check the condition and run the commands of the first case
-      when is_match (saveAssignments *> evalB ic >>= \cond -> when cond (run ib))
-      -- restore current state of Handler
-      put state
-      -- run the next case
-      f is
+      ident ip expr >>= \case
+        -- restore current state of Handler and
+        -- run the next case
+        NONE -> put state >> f is
+        -- check the condition and run the commands of the first case
+        otherwise -> evalB ic >>= \cond -> \case
+          True  -> run ib
+          -- restore current state of Handler and
+          -- run the next case
+          False -> put state >> f is
 
 -- Handle an acting command
-run ((Action a c) : cs) = do
-  cond <- evalB c      -- run the condition
-  when cond (make a)   -- make the action if the condition holds
-  run cs               -- run the next commands
+run ((Apply a c) : cs) = do
+  evalB c >>= \case
+    True  -> eval a >>= \res -> run cs >>= \case {NONE -> return res; x -> return x}
+    False -> run cs
 
 -- Handle an empty command
-run Empty = return Expr.NONE
+run [] = return NONE

@@ -67,9 +67,7 @@ data LSymbolInfo = Symbol
     name_        :: String,   -- ^ name
     synonyms_    :: [String], -- ^ list of synonyms
     categories_  :: [String], -- ^ list of categories
-    description_ :: String,   -- ^ description
-    program      :: Program,  -- ^ program
-    function     :: Function  -- ^ function
+    description_ :: String    -- ^ description
   }
 
 -- | Type for database of logical symbols

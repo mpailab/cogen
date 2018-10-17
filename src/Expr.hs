@@ -15,12 +15,11 @@ Portability : POSIX
 module Expr
     (
       -- exports
-      Expr(..),
-      FExpr,
-      SExpr,
-      TExpr,
+      Assign(..),
       Command(..),
-      PAssign(..)
+      Expr(..),
+      TExpr,
+      Var
     )
 where
 
@@ -41,7 +40,6 @@ data Expr
 
   -- Simple expressions:
   = Var Var        -- ^ program variable
-  | BVar Var       -- ^ global variable
   | Ptr Var Expr   -- ^ pointer to expression
   | Ref Var Expr   -- ^ reference to expression
 
@@ -100,7 +98,7 @@ data Command
   -- | Assign values to undefined variables
   = Assign
     {
-      type  :: Assign, -- ^ type of assigning
+      atype :: Assign, -- ^ type of assigning
       left  :: Expr,   -- ^ left part of assigning
       right :: Expr,   -- ^ right part of assigning
       cond  :: Expr    -- ^ condition of assigning

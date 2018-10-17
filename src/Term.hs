@@ -29,8 +29,8 @@ import           Data.Char
 
 -- Internal imports
 
-data Term a b = T b
-              | a :> [Term a b]
+data Term a = T a
+              | a :> [Term a]
               deriving (Eq, Ord, Show)
 
 instance Foldable Term where
@@ -109,13 +109,13 @@ instance Foldable Term where
 -- instance Apply [Term] where
 --   apply' Operands (t:_) = operands t
 
-class ITerm t a b where
-  header   :: t a b -> a         -- ^ returns term header
-  args     :: t a b -> [Term a b]  -- ^ enumerate arguments of current term
-  subterms :: t a b -> [Term a b]  -- ^ enumerates subterms of current term
-  change   :: t a b -> Int -> t a b -> t a b
+class ITerm t a where
+  header   :: t a -> a         -- ^ returns term header
+  args     :: t a -> [Term a]  -- ^ enumerate arguments of current term
+  subterms :: t a -> [Term a]  -- ^ enumerates subterms of current term
+  change   :: t a -> Int -> t a -> t a
 
-instance ITerm Term a b where
+instance ITerm Term a where
 
   -- Get header of term
   header (x :> _) = x

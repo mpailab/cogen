@@ -68,8 +68,8 @@ import           Utils
 
 data Header = Header
   {
-    name      :: PVar,
-    arguments :: [PVar]
+    name      :: Var,
+    arguments :: [Var]
   }
   deriving (Eq, Ord,Show)
 
