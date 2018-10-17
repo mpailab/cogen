@@ -423,7 +423,7 @@ lambdaParser = do
   args <- many varParser
   reservedOpParser "->"
   cmds <- indentBlock $ many stmtParser
-  return $ FunDef args cmds
+  return $ Fun args cmds
 
 
 -- | try parse term or function call with given header
