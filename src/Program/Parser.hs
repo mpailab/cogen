@@ -558,7 +558,7 @@ fragParser = dbg "parse fragment" >>  do
   string ">}" >> whiteSpaceParser
   args <- extvars <$> getState
   modifyState (\s -> s{ inFrag = inFrag st, extvars = extvars st })
-  return $ Call (FunDef (Var . snd <$> args) res) (Var . fst <$> args)
+  return $ Call (Fun (Var . snd <$> args) res) (Var . fst <$> args)
 
 nameParser:: NameSpace m => Parser m String
 nameParser = identifierParser >>= \name -> getLSymbol name >>= \case
@@ -608,7 +608,7 @@ stmtParser = (dbg "parse statement " >> try (
                 } <|>
              -- Parse an acting instruction
              do { c <- whereParser True
-                ; return (Action p c)
+                ; return (Apply p c)
                 })
          <?> "Statement"))) <|> (dbg "no statement" >> parserZero)
 

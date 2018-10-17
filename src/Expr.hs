@@ -16,11 +16,11 @@ module Expr
     (
       -- exports
       Expr(..),
-      FExpr,
-      SExpr,
       TExpr,
+      Var,
       Command(..),
-      PAssign(..)
+      PSetter(..),
+      Assign(..)
     )
 where
 
@@ -36,13 +36,27 @@ import           Term
 type Var = Int
 type TExpr = Term Expr
 
+data PSetter = PSetter {
+    setp :: forall m. Expr -> m (),
+    getp :: forall m. m Expr
+  }
+
+instance Show PSetter where
+  show _ = "pointer setter function"
+
+instance Ord PSetter where
+  (<=) _ _ = error "not allowed"
+
+instance Eq PSetter where
+  (==) _ _ = error "not allowed"
+
 -- | Type of expressions
 data Expr
 
   -- Simple expressions:
   = Var Var        -- ^ program variable
   | BVar Var       -- ^ global variable
-  | Ptr Var Expr   -- ^ pointer to expression
+  | Ptr Var Expr -- ^ pointer to expression
   | Ref Var Expr   -- ^ reference to expression
 
   -- Constant expressions:
@@ -75,6 +89,9 @@ data Expr
   | Call Expr  [Expr]    -- ^ partial function call
   | Fun [Expr] [Command] -- ^ partial function definiton
 
+  -- pointer operations
+  | PSet PSetter
+
   -- Undefined expression:
   | NONE
 
@@ -100,10 +117,10 @@ data Command
   -- | Assign values to undefined variables
   = Assign
     {
-      type  :: Assign, -- ^ type of assigning
-      left  :: Expr,   -- ^ left part of assigning
-      right :: Expr,   -- ^ right part of assigning
-      cond  :: Expr    -- ^ condition of assigning
+      assign :: Assign, -- ^ type of assigning
+      left   :: Expr,   -- ^ left part of assigning
+      right  :: Expr,   -- ^ right part of assigning
+      cond   :: Expr    -- ^ condition of assigning
     }
 
   -- | Branch to a commands sequence

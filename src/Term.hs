@@ -17,7 +17,7 @@ module Term
     (
       -- exports
       Term(..),
-      header, args, subterms, change
+      header, subterms, change
       -- drawTerm,
       -- getVarNum,
       -- isContainLSymbol
@@ -26,16 +26,28 @@ where
 
 -- External imports
 import           Data.Char
+import           Control.Applicative
 
 -- Internal imports
 
-data Term a b = T b
-              | a :> [Term a b]
-              deriving (Eq, Ord, Show)
+data Term a = T a
+            | a :> [Term a]
+            | a :>> a
+            deriving (Eq, Ord, Show)
 
 instance Foldable Term where
   foldMap f (T x)     = f x
   foldMap f (x :> ts) = f x `mappend` foldMap (foldMap f) ts
+
+instance Functor Term where
+  fmap f (T x) = T (f x)
+  fmap f (h :> args) = f h :> fmap (fmap f) args
+  fmap f (h :>> l) = f h :>> f l
+
+instance Traversable Term where
+  traverse f (T x) = T <$> f x
+  traverse f (h :> args) = liftA2 (:>) (f h) (traverse (traverse f) args)
+  traverse f (h :>> l) = liftA2 (:>>) (f h) (f l)
 
 -- instance Show Term where
 --   show (Var (P x))   = "$p" ++ show x
@@ -109,13 +121,13 @@ instance Foldable Term where
 -- instance Apply [Term] where
 --   apply' Operands (t:_) = operands t
 
-class ITerm t a b where
-  header   :: t a b -> a         -- ^ returns term header
-  args     :: t a b -> [Term a b]  -- ^ enumerate arguments of current term
-  subterms :: t a b -> [Term a b]  -- ^ enumerates subterms of current term
-  change   :: t a b -> Int -> t a b -> t a b
+class ITerm t a where
+  header   :: t a -> a         -- ^ returns term header
+  args     :: t a -> [Term a]  -- ^ enumerate arguments of current term
+  subterms :: t a -> [Term a]  -- ^ enumerates subterms of current term
+  change   :: t a -> Int -> t a -> t a
 
-instance ITerm Term a b where
+instance ITerm Term a where
 
   -- Get header of term
   header (x :> _) = x

@@ -1,4 +1,4 @@
-c{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
@@ -24,6 +24,7 @@ where
 -- External imports
 import           Control.Monad.State
 import           Data.Foldable
+import           Control.Applicative
 import qualified Data.Map            as M
 
 -- Internal imports
@@ -35,15 +36,15 @@ import Expr
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-class Handler m a where
-  handle :: Expr -> a
+-- class Handler m a where
+--   handle :: Expr -> a
 
-instance Monad m => Handler m (m Expr) where
-  handle e = evalState (eval e) (Info M.empty)
+-- instance Monad m => Handler m (m Expr) where
+--   handle e = evalState (eval e) (Info M.empty)
 
-instance (Monad m, Handler m a) => Handler m (Expr -> a) where
-  handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x a NONE
-                               in handle (Fun xs (cmd:cmds))
+-- instance (Monad m, Handler m a) => Handler m (Expr -> a) where
+--   handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x a NONE
+--                                in handle (Fun xs (cmd:cmds))
 
 type Args = M.Map Var Expr
 
@@ -54,12 +55,14 @@ data Info = Info
   }
 
 type Handler m a = StateT Info m a
+handle :: MonadPlus m => Expr -> m Expr
+handle e = evalStateT (eval e) (Info M.empty)
 
 ------------------------------------------------------------------------------------------
 -- Functions
 
-getArg :: Monad m => Var -> Handler m (Maybe Expr)
-getArg x = get >>= M.lookup x args
+getVal :: Monad m => Var -> Handler m (Maybe Expr)
+getVal x = M.lookup x <$> args <$> get
 
 setVal :: Monad m => Int -> Expr -> Handler m ()
 setVal x v = modify (\info -> info {args = M.insert x v (args info)})
@@ -68,15 +71,15 @@ setVal x v = modify (\info -> info {args = M.insert x v (args info)})
 -- swapArg x y = modify (\info -> info {args = M.insert x y (args info)})
 
 
-eval :: Monad m => Expr -> Handler m Func
+eval :: MonadPlus m => Expr -> Handler m Expr
 
-eval (Var i) = getArg i >>= \case
+eval (Var i) = getVal i >>= \case
   Just x  -> return x
   Nothing -> error "Evaluating error: a program variable is not initialized.\n"
 
 eval (Ptr _ _) = error "Evaluating error: can't take a pointer in the evaluating mode. Try take a reference x@(...).\n"
 
-eval (Ref i e) = eval e >>= \x -> setArg i >> return x
+eval (Ref i e) = eval e >>= \x -> setVal i x >> return x
 
 eval x@(Sym _) = return x
 
@@ -86,36 +89,37 @@ eval Any = error "Evaluating error: can't evaluate any expression.\n"
 
 eval AnySeq = error "Evaluating error: can't evaluate any sequence of expressions.\n"
 
-eval x@(Const _) = return x
+eval x@(Bool _) = return x
 
-eval (Equal x y) = Const <$> liftM2 (==) (eval x) (eval y)
+eval (Equal x y) = Bool <$> liftM2 (==) (eval x) (eval y)
 
-eval (NEqual x y) = Const <$> liftM2 (!=) (eval x) (eval y)
+eval (NEqual x y) = Bool <$> liftM2 (/=) (eval x) (eval y)
 
 eval (In x y) = eval x >>= \ex -> eval y >>= \case
-  (Alt   ey) -> return (elem ex ey)
-  (Tuple ey) -> return (elem ex ey) -- tuples are handled as lists
-  (List  ey) -> return (elem ex ey)
-  (Set   ey) -> return (elem ex ey) -- sets are handled as lists
+  (Alt   ey) -> return $ Bool (elem ex ey)
+  (Tuple ey) -> return $ Bool (elem ex ey) -- tuples are handled as lists
+  (List  ey) -> return $ Bool (elem ex ey)
+  (Set   ey) -> return $ Bool (elem ex ey) -- sets are handled as lists
   _          -> error "Evaluating error: a wrong in-expression.\n"
 
-eval (Not x) = Bool <$> Prelude.not <$> (evalB x)
+eval (Not x) = Bool <$> Prelude.not <$> evalB x
 
-eval (And xs) = Bool <$> (foldrM (\y -> return . (y &&)) True) <$> mapM evalB xs
+eval (And xs) = Bool . and <$> mapM evalB xs
 
-eval (Or xs) = Bool <$> (foldrM (\y -> return . (y ||)) False) <$> mapM evalB xs
+eval (Or xs) = Bool . or <$> mapM evalB xs
 
 eval (IfElse c t f) = evalB c >>= \case
   True  -> eval t
   False -> eval f
 
 eval (CaseOf e []) = error "Evaluating error: can't evaluate an empty case-expression.\n"
-eval (CaseOf e ((p,c):cs)) = ident e p >>= \case
-  True  -> eval c
-  False -> eval (CaseOf e cs)
+eval (CaseOf e cs) = msum $ (\(p,c) -> ident e p >> eval c) <$> cs --p >>= \case
+  -- True  -> eval c
+  -- False -> eval (CaseOf e cs)
 
-eval (Term (T x)) = Term <$> T <$> eval x
-eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x) (mapM eval xs)
+--eval (Term (T x)) = Term <$> T <$> eval x
+--eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x) (mapM eval xs)
+eval (Term t) = Term <$> traverse eval t
 
 eval (Alt xs)   = Alt   <$> mapM eval xs
 
@@ -125,112 +129,132 @@ eval (List xs)  = List  <$> mapM eval xs
 
 eval (Set xs)   = Set   <$> mapM eval xs
 
-evalB :: Monad m => Expr -> Handler m Bool
+evalB :: MonadPlus m => Expr -> Handler m Bool
 evalB e = eval e >>= \case
   Bool c -> return c
   _      -> error "Evaluating error: a wrong Boolean expression.\n"
 
-ident :: Monad m => Expr -> Expr -> Handler m Bool
+identB :: MonadPlus m => Expr -> Expr -> Handler m Bool
+identB x y = optional (ident x y) >>= \case
+  Just _  -> return True
+  Nothing -> return False
 
-ident (Alt xs) y = f (\x -> ident x y) xs
-ident x (Alt ys) = f (ident x) ys
+ident1 :: MonadPlus m => Expr -> Expr -> Handler m ()
+ident1 x y = optional (ident x y) >>= \case
+  Just _  -> return ()
+  Nothing -> mzero
 
-ident (Var i) y = getArg i >>= \case
-  Just x  -> setSwap (swapAssignment i) >> ident x y
-  Nothing -> eval y >>= setAssignment i >> return True
+ident :: MonadPlus m => Expr -> Expr -> Handler m ()
 
-ident x (Var i) = getAssignment i >>= \case
-  Just y  -> setSwap (swapAssignment i) >> ident x y
-  Nothing -> eval x >>= setAssignment i >> return True
+ident (Alt xs) y = msum $ (\x -> ident x y) <$> xs
+ident x (Alt ys) = msum $ ident x <$> ys
 
-ident (Ptr i x) y = ident x y >>= \case
-  True  -> eval y >>= \e ->
-           getSwap >>= \sw ->
-           setAssignment i (Swap e sw) >> return True
-  False -> return False
+ident (Var i) y = getVal i >>= \case
+  Just x  -> {-??? setSwap (swapAssignment i) >> -} ident x y
+  Nothing -> eval y >>= setVal i -- >> return True
 
-ident x (Ptr i y) = ident x y >>= \case
-  True  -> eval x >>= \e ->
-           getSwap >>= \sw ->
-           setAssignment i (Swap e sw) >> return True
-  False -> return False
+ident x (Var i) = getVal i >>= \case
+  Just y  -> {-setSwap (swapAssignment i) >>-} ident x y
+  Nothing -> eval x >>= setVal i -- >> return True
 
-ident (Ref i x) y = ident x y >>= \case
-  True  -> eval y >>= setAssignment i >> return True
-  False -> return False
+ident (Ptr i (PSet (PSetter _ g))) y = do
+  x <- g
+  ident1 x y
 
-ident x (Ref i y) = ident x y >>= \case
-  True  -> eval x >>= setAssignment i >> return True
-  False -> return False
+  -- pointers not compiling
+-- ident (Ptr i x) y = do
+--   ident x y
+--   e <- eval y
+--   setVal i (PSet (PSetter { setp = setVal i, getp = getVal i }))
+    -- e <- eval y
+  --          getSwap >>= \sw ->
+  --          setAssignment i (Swap e sw) >> return True
+
+
+-- ident x (Ptr i y) = ident x y >>= \case
+--   True  -> eval x >>= \e ->
+--            getSwap >>= \sw ->
+--            setAssignment i (Swap e sw) >> return True
+--   False -> return False
+
+ident (Ref i x) y = ident x y >> eval y >>= setVal i
+
+ident x (Ref i y) = ident x y >> eval x >>= setVal i
 
 ident (IfElse c t f) y = eval c >>= \case
   Bool True  -> ident t y
   Bool False -> ident f y
-  otherwise  -> return False
+  otherwise  -> error "Boolean expression expected"
 
 ident x (IfElse c t f) = eval c >>= \case
   Bool True  -> ident x t
   Bool False -> ident x f
-  otherwise  -> return False
+  otherwise  -> error "Boolean expression expected"
 
-ident (CaseOf e []) y = return False
-ident (CaseOf e ((p,x):cs)) y = ident e p >>= \case
-  True  -> ident x y
-  False -> ident (CaseOf e cs) y
+ident (CaseOf e cs) y = msum $ (\(x,p) -> ident1 e p >> ident x y) <$> cs
 
-ident x (CaseOf e []) = return False
-ident x (CaseOf e ((p,y):cs)) = ident e p >>= \case
-  True  -> ident x y
-  False -> ident x (CaseOf e cs)
+ident x (CaseOf e cs) = msum $ (\(y,p) -> ident1 e p >> ident x y) <$> cs
 
-ident (Swap x sw) y = setSwap sw >> ident x y
-ident x (Swap y sw) = setSwap sw >> ident x y
+-- ident (Swap x sw) y = setSwap sw >> ident x y -- ^ now there is no Swap constructor in Expr
+-- ident x (Swap y sw) = setSwap sw >> ident x y
 
-ident (Call n args) y = getFun n >>= \f -> f <$> mapM eval args >>= \e -> ident e y
-ident x (Call n args) = getFun n >>= \f -> f <$> mapM eval args >>= \e -> ident x e
+ident x@(Call n args) y = eval x >>= \e -> ident e y
+
+ident x y@(Call n args) = eval y >>= ident x
 
 ident (Sym x) y = eval y >>= \case
-  Sym s -> return (s == x)
-  _     -> return False
+  Sym s -> guard (s == x)
+  _     -> mzero
 
 ident x (Sym y) = eval x >>= \case
-  Sym s -> return (s == y)
-  _     -> return False
+  Sym s -> guard (s == y)
+  _     -> mzero
 
 ident (Int x) y = eval y >>= \case
-  Int i -> return (i == x)
-  _     -> return False
+  Int i -> guard (i == x)
+  _     -> mzero
 
 ident x (Int y) = eval x >>= \case
-  Int i -> return (i == y)
-  _     -> return False
+  Int i -> guard (i == y)
+  _     -> mzero
 
-ident Any _ = return True
-ident _ Any = return True
+ident Any _ = return ()
+ident _ Any = return ()
 
 ident (Term (T x)) (Term (T y)) = ident x y
-ident (Term (T x)) (Term y) = eval x >>= \case
-  Term t    -> ident t y
-  otherwise -> return False
-ident (Term x) (Term (T y)) = eval y >>= \case
-  Term t    -> ident x t
-  otherwise -> return False
-ident (Term (x :> xs)) (Term (y :> ys)) = ident (List (x:xs)) (List (y:ys))
+ident (Term (T x)) y@(Term _) = eval x >>= \case
+  Term t    -> ident (Term t) y
+  otherwise -> mzero
 
-ident (Tuple xs) (Tuple ys) = g xs ys
+ident x@(Term _) (Term (T y)) = eval y >>= \case
+  Term t    -> ident x (Term t)
+  otherwise -> mzero
 
-ident (List xs) (List ys) = g xs ys
+ident (Term (x :> xs)) (Term (y :> ys)) = ident (List $ x:(Term <$> xs)) (List $ y:(Term <$> ys))
 
-ident (Set xs) (Set ys) = g xs ys
+ident (Tuple xs) (Tuple ys) = identSeq xs ys
+
+ident (List xs) (List ys) = identSeq xs ys
+
+ident (Set xs) (Set ys) = identSeq xs ys
 
 ident _ _ = error "Error: An unsupported identification.\n"
 
-where
-  f x ys  = mapM x ys >>= foldrM (\z -> return . (z ||)) False
-  g xs ys = zipWithM ident xs ys >>= foldrM (\z -> return . (z &&)) True
+-- | identification of 2 sequences.
+-- | not efficient implementation in enumerating case
+identSeq :: MonadPlus m => [Expr] -> [Expr] -> Handler m ()
+identSeq [] [] = return ()
+identSeq (x:_) [] = mzero
+identSeq [] (y:_) = mzero
+identSeq (x:xs) (y:ys) = ident x y >> identSeq xs ys
+
+--identSeq xs ys = zipWithM ident xs ys >>= foldrM (\z -> return . (z &&)) True
+-- | identification with one of alternatives
+--identAlt :: MonadPlus m => Expr -> [Expr] -> Handler m ()
+--identAlt x ys  = mapM x ys >>= foldrM (\z -> return . (z ||)) False
 
 -- | Run a list of commands
-run :: Monad m => [Command] -> Handler m LExpr
+run :: MonadPlus m => [Command] -> Handler m Expr
 
 -- Handle an assignment command of the form 'p <- g | c', where
 --  p is a program expression denoting a list of patterns;
@@ -258,24 +282,24 @@ run ((Assign Select p g c) : cs) =
         _         -> error "Unsupported value in a Select-assignment command\n"
     otherwise -> error "Unsupported pattern in a Select-assignment command\n"
   where
-    f :: [Expr] -> [Expr] -> Handler m Expr
+    f :: MonadPlus m => [Expr] -> [Expr] -> Handler m Expr
     f [] _ = do
       -- check the condition
-      cond <- evalB c
+      evalB c >>= guard
       -- run the next commands if necessary
-      when cond (run cs)
+      run cs
 
-    f (x:xs) (y:ys) = when (length ps <= length gs) do
-      -- save current state of Handler
-      state <- get
-      -- identify the first pattern with the first value
-      is_match <- ident x y
-      -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> f xs ys)
-      -- restore current state of Handler
-      put state
-      -- identify the list of patterns with the tail of values
-      f (x:xs) ys
+    f (x:xs) (y:ys) = guard (length xs <= length ys) >> do
+          -- save current state of Handler
+          state <- get
+          -- identify the first pattern with the first value
+          is_match <- identB x y
+          -- continue the identification of remaining patterns
+          when is_match $ (f xs ys) >> return () --else return ()
+          -- restore current state of Handler
+          put state
+          -- identify the list of patterns with the tail of values
+          f (x:xs) ys
 
 -- Handle an assignment command of the form 'p ~= g | c', where
 --  p is a program expression denoting a list of patterns;
@@ -297,17 +321,18 @@ run ((Assign Select p g c) : cs) =
 run ((Assign Unord p g c) : cs) =
   eval p >>= \case
     (List ps) -> (eval g >>= \case
-      (List gs) -> when (length ps <= length gs + 1) (f ps gs (length gs))
+      (List gs) -> guard (length ps <= length gs + 1) >> (f ps gs (length gs))
       _         -> error "Unsupported value in PMUnord assignment command")
     _         -> error "Unsupported pattern in PMUnord assignment command"
   where
+    f :: MonadPlus m => [Expr] -> [Expr] -> Int -> Handler m Expr
     f [] [] 0 = do
       -- check the condition
       cond <- evalB c
       -- run the next commands if necessary
-      when cond (run cs)
+      guard cond >> run cs
 
-    f _ _ 0 = return
+    f _ _ 0 = return NONE
 
     f [Ref i AnySeq] ys n = do
       -- assign a program variable with the number i the list ys
@@ -315,15 +340,15 @@ run ((Assign Unord p g c) : cs) =
       -- check the condition
       cond <- evalB c
       -- run the next commands if necessary
-      when cond (run cs)
+      guard cond >> run cs
 
     f (z@(Ref i AnySeq):x:xs) (y:ys) n = do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the first value
-      is_match <- ident x y
+      is_match <- identB x y
       -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> f (z:xs) ys (length ys))
+      (guard is_match >> f (z:xs) ys (length ys)) <|> return NONE
       -- restore current state of Handler
       put state
       -- identify the list of patterns with the shifted values
@@ -333,9 +358,9 @@ run ((Assign Unord p g c) : cs) =
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the first value
-      is_match <- ident x y
+      is_match <- identB x y
       -- continue the identification of remaining patterns
-      when is_match (saveAssignments *> f xs ys (length ys))
+      (guard is_match >> f xs ys (length ys)) <|> return NONE
       -- restore current state of Handler
       put state
       -- identify the list of patterns with the shifted values
@@ -353,12 +378,16 @@ run ((Assign Unord p g c) : cs) =
 --
 -- We handle a command 'p << g | c' as follows. First, we eval p as a list of logical expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and c as a logical constant C. If C is true, we assign p the new value [p1,...,pn,g1,...,gm].
 --
-run ((Assign Append p g c) : cs) = do
-  cond <- evalB c
-  when cond (isAssigned p >>= \case
-    True  -> liftM2 (++) (eval p) (eval g)
-    False -> assign p <$> (eval g))
-  run cs
+-- !!!!!!!! reimplement with functions
+-- run ((Assign Append p g c) : cs) = do
+--   guard <$> evalB c
+--   case p of
+--     Var v ->
+--       getVal v >>= \case
+--         Just _  -> liftM2 (++) (eval p) (eval g)
+--         Nothing -> assign p <$> (eval g)
+--     _ -> error "left side of `<<` must be a variable"
+--   run cs
 
 -- Handle a branch command of the form:
 -- if c
@@ -368,7 +397,7 @@ run ((Assign Append p g c) : cs) = do
 run ((Branch c b) : cs) = do
   state <- get         -- save current state of Handler
   cond <- evalB c      -- evaluate the condition
-  when cond (run b)    -- run the branch commands if the condition holds
+  (guard cond >> run b) <|> return NONE    -- run the branch commands if the condition holds
   put state            -- restore current state of Handler
   run cs               -- run the next commands
 
@@ -384,29 +413,30 @@ run ((Switch e c i) : cs) = do
   cond <- evalB c
   if cond
   then do
-    expr <- eval e
     f i               -- handle a case corresponing to the expression
   else
     run cs            -- run the next commands
   where
+    f :: MonadPlus m => [(Expr,Expr,[Command])] -> Handler m Expr
     f [] = run cs
     f ((ip,ic,ib):is) = do
       -- save current state of Handler
       state <- get
       -- identify the first pattern with the logical expression
-      is_match <- ident ip expr
+      is_match <- (eval e >>= identB ip)
       -- check the condition and run the commands of the first case
-      when is_match (saveAssignments *> evalB ic >>= \cond -> when cond (run ib))
+      (guard is_match >> {-saveAssignments *>-} evalB ic >>= guard >> run ib) <|> return NONE
       -- restore current state of Handler
       put state
       -- run the next case
       f is
 
 -- Handle an acting command
-run ((Action a c) : cs) = do
-  cond <- evalB c      -- run the condition
-  when cond (make a)   -- make the action if the condition holds
-  run cs               -- run the next commands
+-- make not defined
+-- run ((Apply a c) : cs) = do
+--   cond <- evalB c      -- run the condition
+--   when cond (make a)   -- make the action if the condition holds
+--   run cs               -- run the next commands
 
 -- Handle an empty command
-run Empty = return Expr.NONE
+run [] = return Expr.NONE

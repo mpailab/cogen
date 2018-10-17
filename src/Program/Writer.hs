@@ -106,7 +106,7 @@ instance Write Expr where
 
   writeI par (Alt vars) = inpars par $ writeSequenceS " | " vars write0
 
-  writeI par (FunDef args cmds) = inpars par $ "\\" +>+
+  writeI par (Fun args cmds) = inpars par $ "\\" +>+
                   writeSequenceS " " args (writeI True) +<>+ " -> \n" +>+ indented0 (
                     writeSequenceS "" cmds (indented write0)
                   ) +<>+ if par then indent else return ""
@@ -158,7 +158,7 @@ instance Write Command where
     indented writeSwitchCases cs
 
   -- | Write an acting instruction of program fragment corresponding to a given indent
-  writeI _ (Action act cond) =
+  writeI _ (Apply act cond) =
     indent +<>+ write0 act +<>+ writeWhereCond cond
 
 write0 :: (Write t, ProgWriter m) => t -> m String
