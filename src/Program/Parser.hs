@@ -20,11 +20,12 @@ where
 -- External imports
 import           Control.Monad.State
 import           Data.Char
+import           Data.Functor
 import           Data.List
 import qualified Data.Map               as Map
 import           Data.Maybe
 import qualified Data.Text              as Text
-import           Data.Functor
+import           Debug.Trace
 import           Text.Parsec
 import           Text.Parsec.Char
 import           Text.Parsec.Combinator
@@ -34,7 +35,6 @@ import           Text.Parsec.Language
 import           Text.Parsec.Prim
 import           Text.Parsec.Text       hiding (Parser)
 import           Text.Parsec.Token
-import           Debug.Trace
 
 -- Internal imports
 import           Expr
@@ -47,10 +47,10 @@ import           Utils
 -- Data types and classes declaration
 
 data PState = PSt {
-    inFrag :: Bool,
+    inFrag    :: Bool,
     isPattern :: Bool,
-    indents :: [IndentSt],
-    extvars :: [(Int,Int)]
+    indents   :: [IndentSt],
+    extvars   :: [(Int,Int)]
   }
 type IndentSt = Either (Int,Int) Int
 
@@ -316,7 +316,7 @@ data PatternType
   deriving (Eq,Show)
 
 pattp NoPattern _ = NoPattern
-pattp _ pt = pt
+pattp _ pt        = pt
 
 anySeq :: NameSpace m => Parser m Expr
 anySeq = ispattern >> try (
@@ -444,7 +444,7 @@ simpleTermParser = getState >>= (\st -> dbg ("parse term or header : pm = " ++ s
     )
     where
       tryEntry (Var n) = dbg "try entry" >> entryTailParser True n
-      tryEntry _ = parserZero
+      tryEntry _       = parserZero
 
 -- simpleTermParser :: NameSpace m => PatternType -> Parser m TExpr
 -- simpleTermParser pm =  dbg "parse one term" >>
@@ -482,7 +482,7 @@ relationParser = inpattern vexprParser >>= \left ->
                      }
               <|> case left of
                     (Var n) -> return (Var n)
-                    _ -> parserZero
+                    _       -> parserZero
               <?> "relation"
 
 atomBool :: NameSpace m => Parser m Expr
@@ -518,7 +518,7 @@ makeBinOp assoc name = do {
   ; op <- case s of {Just x -> return x; _ -> parserZero <?> "unknown operator "++name}
   ; return (\x y -> Call (Sym op) (args op x++args op y))
 } where args op t@(Call (Sym o) a) = if o==op then a else [t]
-        args _ t = [t]
+        args _ t                   = [t]
 
 vexprParser :: NameSpace m => Parser m Expr
 vexprParser = buildExpressionParser tableExpr atomExprParser
@@ -558,7 +558,7 @@ fragParser = dbg "parse fragment" >>  do
   string ">}" >> whiteSpaceParser
   args <- extvars <$> getState
   modifyState (\s -> s{ inFrag = inFrag st, extvars = extvars st })
-  return $ Call (FunDef (Var . snd <$> args) res) (Var . fst <$> args)
+  return $ Call (Fun (Var . snd <$> args) res) (Var . fst <$> args)
 
 nameParser:: NameSpace m => Parser m String
 nameParser = identifierParser >>= \name -> getLSymbol name >>= \case
@@ -608,7 +608,7 @@ stmtParser = (dbg "parse statement " >> try (
                 } <|>
              -- Parse an acting instruction
              do { c <- whereParser True
-                ; return (Action p c)
+                ; return (Apply p c)
                 })
          <?> "Statement"))) <|> (dbg "no statement" >> parserZero)
 
@@ -636,7 +636,7 @@ toList x = List [x]
 
 -- | Negate a given program term
 pNot :: Expr -> Expr
-pNot (Bool x)    = Bool (not x)
+pNot (Bool x)     = Bool (not x)
 pNot (Not x)      = x
 pNot (Equal x y)  = NEqual x y
 pNot (NEqual x y) = Equal x y
@@ -644,10 +644,10 @@ pNot x            = Not x
 
 -- | Take the logical and of given program terms
 pAnd :: Expr -> Expr -> Expr
-pAnd (Bool True) y    = y
-pAnd x (Bool True)    = x
-pAnd x@(Bool False) y = x
-pAnd x y@(Bool False) = y
+pAnd (Bool True) y     = y
+pAnd x (Bool True)     = x
+pAnd x@(Bool False) y  = x
+pAnd x y@(Bool False)  = y
 pAnd (And xs) (And ys) = And (xs ++ ys)
 pAnd x (And ys)        = And (x : ys)
 pAnd (And xs) y        = And (xs ++ [y])
@@ -659,10 +659,10 @@ pOr x@(Bool True) y = x
 pOr x y@(Bool True) = y
 pOr (Bool False) y  = y
 pOr x (Bool False)  = x
-pOr (Or xs) (Or ys)  = Or (xs ++ ys)
-pOr x (Or ys)        = Or (x : ys)
-pOr (Or xs) y        = Or (xs ++ [y])
-pOr x y              = Or [x,y]
+pOr (Or xs) (Or ys) = Or (xs ++ ys)
+pOr x (Or ys)       = Or (x : ys)
+pOr (Or xs) y       = Or (xs ++ [y])
+pOr x y             = Or [x,y]
 
 ------------------------------------------------------------------------------------------
 -- Auxiliary functions

@@ -31,6 +31,7 @@ import           Data.Char
 
 data Term a = T a
               | a :> [Term a]
+              | a :>> a
               deriving (Eq, Ord, Show)
 
 instance Foldable Term where

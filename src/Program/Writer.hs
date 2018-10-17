@@ -40,8 +40,8 @@ class NameSpace m => ProgWriter m where
   setIndent :: Int -> m ()
   inci :: m ()
   deci :: m ()
-  inci = getIndent >>= \ind -> (echo ("increase indent"++show ind) >> setIndent (ind+1))
-  deci = getIndent >>= \ind -> (echo ("decrease indent"++show ind) >> setIndent (ind-1))
+  inci = getIndent >>= \ind -> echo ("increase indent"++show ind) >> setIndent (ind+1)
+  deci = getIndent >>= \ind -> echo ("decrease indent"++show ind) >> setIndent (ind-1)
 
   indent :: m String
   indent = getIndent >>= writeIndent
@@ -71,7 +71,7 @@ class Write a where
   writeI :: ProgWriter m => Bool -> a -> m String
 
   write :: NameSpace m => a -> m String
-  write x = evalStateT wrI 0 >>= return
+  write x = evalStateT wrI 0
             where wrI :: NameSpace m => SimpleWriter m String
                   wrI = writeI False x
 
@@ -87,7 +87,6 @@ instance Write Expr where
   writeI _ (Bool x) = return $ show x
   writeI par (Term t) = writeI par t
   writeI _ (Var n) = writeVar n
-  writeI _ (BVar n) = writeVar n
   writeI _ (Sym s) = nameLSymbol s
   writeI _ Any = return "_"
   writeI _ AnySeq = return "__"
@@ -106,7 +105,7 @@ instance Write Expr where
 
   writeI par (Alt vars) = inpars par $ writeSequenceS " | " vars write0
 
-  writeI par (FunDef args cmds) = inpars par $ "\\" +>+
+  writeI par (Fun args cmds) = inpars par $ "\\" +>+
                   writeSequenceS " " args (writeI True) +<>+ " -> \n" +>+ indented0 (
                     writeSequenceS "" cmds (indented write0)
                   ) +<>+ if par then indent else return ""
@@ -158,7 +157,7 @@ instance Write Command where
     indented writeSwitchCases cs
 
   -- | Write an acting instruction of program fragment corresponding to a given indent
-  writeI _ (Action act cond) =
+  writeI _ (Apply act cond) =
     indent +<>+ write0 act +<>+ writeWhereCond cond
 
 write0 :: (Write t, ProgWriter m) => t -> m String
@@ -174,8 +173,8 @@ writeVar n = namePVar n >>= \case
 
 -- | Write sequence
 writeSequenceS :: NameSpace m => String -> [a] -> (a -> m String) -> m String
-writeSequenceS _ [] wr = return ""
-writeSequenceS _ [x] wr    = wr x
+writeSequenceS _ [] wr       = return ""
+writeSequenceS _ [x] wr      = wr x
 writeSequenceS sep (x:xs) wr = wr x +<>+ sep +>+ writeSequenceS sep xs wr
 
 -- | Write sequence
