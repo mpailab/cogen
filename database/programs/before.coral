@@ -10,8 +10,10 @@ f arg thrm =
         do
           h [plus[_,x]] | h [x] = concl where h in [equality, equivalence] -- comment 2
             x eq y      -- comment 3
+          f = \x y -> x++y
           Efgh = x `f` y -- call f x y
-          Abcd = h` abcd `y
+          c = (\x -> f` x x)` [a,b,c]
+          Abcd = (if a then h else f)` abcd `y
           Identification << {<
             describe = type
             $b ++ other ~= $list`

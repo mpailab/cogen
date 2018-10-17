@@ -186,6 +186,7 @@ coralDef = emptyDef
   , reservedOpNames= ["=", "<-", "@", "&&", "||", "|", "+", "++", "-", "*", "/", "&", "$", "<<", "~=", ".."]
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "eq", "ne", "in",
+                      "then", "else",
                       "args", "replace", "_", "__"]
   , caseSensitive  = True
   }
@@ -365,6 +366,7 @@ compParser =  dbg "parse comp" >> (
 simpleVExprParser :: NameSpace m => Parser m Expr
 simpleVExprParser = dbg "parse vexpr" >> (
                       Int <$> intParser
+                  <|> lambdaParser
                   <|> (compParser >>= \case
                         Term (T v@(Var n)) -> entryTailParser False n <|> return v
                         Term (T t)       -> return t
@@ -415,6 +417,15 @@ atomExprParser = fragParser
           <|> (complexExprParser False >>= vexprTailParser)
           <?> "vexpr"
 
+lambdaParser:: NameSpace m => Parser m Expr
+lambdaParser = do
+  string "\\"
+  args <- many varParser
+  reservedOpParser "->"
+  cmds <- indentBlock $ many stmtParser
+  return $ FunDef args cmds
+
+
 -- | try parse term or function call with given header
 parseTermArgs :: NameSpace m => Expr -> Parser m TExpr
 parseTermArgs h =
@@ -437,7 +448,7 @@ simpleTermParser = getState >>= (\st -> dbg ("parse term or header : pm = " ++ s
               t  -> return t            -- ^ otherwise it is already a term
           )
       <|> do { dbg "th : try symbol"
-             ; sym <- anyElem <|> symbolParser
+             ; sym <- anyElem <|> symbolParser <|> (parensParser lambdaParser <* lookAhead funcApp)
              ; dbg $ "sym = "++show sym
              ; T <$> tryEntry sym <|> parseTermArgs sym
              }
