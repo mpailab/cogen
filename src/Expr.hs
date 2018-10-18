@@ -45,7 +45,7 @@ data Expr
 
   -- Constant expressions:
   | Sym LSymbol    -- ^ logical symbol
-  | Int Int        -- ^ integer
+  | Int Integer    -- ^ integer
   | Any            -- ^ any expression
   | AnySeq         -- ^ any sequence of expressions
 

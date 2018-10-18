@@ -31,6 +31,7 @@ import           Expr
 import           LSymbol
 import           Program
 import           Term
+import           Program.BuiltIn
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -116,6 +117,7 @@ eval (CaseOf e ((p,c):cs)) = ident e p >>= \case
 
 eval (Term (T x)) = Term . T <$> eval x
 eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x) (map (\(Term t) -> t) <$> mapM (eval . Term) xs)
+eval (Term (x :>> xs)) = Term <$> liftM2 (:>) (eval x) ((\(List l) -> map (\(Term t) -> t) l) <$> eval xs)
 
 eval (Alt xs)   = Alt   <$> mapM eval xs
 
@@ -125,13 +127,7 @@ eval (List xs)  = List  <$> mapM eval xs
 
 eval (Set xs)   = Set   <$> mapM eval xs
 
-eval (Call (Var i) as) = getVal i >>= \case
-  Just f  -> eval (Call f as)
-  Nothing -> error "Evaluating error: can't call an undefined function.\n"
-eval (Call (Fun [] cs) []) = run cs
-eval (Call (Fun (x:xs) cs) (a:as)) = let c = Assign Simple x a NONE
-                                     in eval (Call (Fun xs (c:cs)) as)
-eval (Call e as) = return e
+eval (Call f args) = evalCall f args
 
 eval (Fun _ _) = error "Evaluating error: can't evaluate a function definition.\n"
 
@@ -141,6 +137,23 @@ evalB :: Monad m => Expr -> Handler m Bool
 evalB e = eval e >>= \case
   Bool c -> return c
   _      -> error "Evaluating error: a wrong Boolean expression.\n"
+
+evalCall :: Monad m => Expr -> [Expr] -> Handler m Expr
+evalCall ff@(Sym (IL s)) as = case getBuiltInFunc s of
+  Just (BuiltInFunc n f)  -> if n > length as then return $ Call ff as
+                             else if n == length as
+                             then mapM eval as >>= f
+                             else mapM eval af >>= f >>= \x -> return $ Call x al
+                             where (af,al) = splitAt n as
+  Nothing -> error "Evaluating error: call to nonexisting built-in function.\n"
+evalCall (Var i) as = getVal i >>= \case
+  Just f  -> evalCall f as
+  Nothing -> error "Evaluating error: can't call an undefined function.\n"
+evalCall (Fun [] cs) [] = run cs
+evalCall (Fun (x:xs) cs) (a:as) = let c = Assign Simple x a NONE
+                                     in evalCall (Fun xs (c:cs)) as
+evalCall e as = return e  -- ^ it's very strange behaviour : 1` x = 1; maybe report an error in this case?
+
 
 identAlt :: Monad m => (Expr -> Handler m Expr) -> [Expr] -> Handler m Expr
 identAlt f [] = return NONE

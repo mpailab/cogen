@@ -24,6 +24,7 @@ library
                        Program.Handler
                        Program.Parser
                        Program.Writer
+                       Program.BuiltIn
                        Rule
                        Term
                        Utils

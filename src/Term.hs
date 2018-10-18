@@ -26,18 +26,28 @@ where
 
 -- External imports
 import           Data.Char
+import           Control.Applicative
 
 -- Internal imports
 
 data Term a = T a
-              | a :> [Term a]
-              | a :>> a
-              deriving (Eq, Ord, Show)
+            | a :> [Term a]
+            | a :>> a
+            deriving (Eq, Ord, Show)
 
 instance Foldable Term where
   foldMap f (T x)     = f x
   foldMap f (x :> ts) = f x `mappend` foldMap (foldMap f) ts
 
+instance Functor Term where
+  fmap f (T x) = T (f x)
+  fmap f (h :> args) = f h :> fmap (fmap f) args
+  fmap f (h :>> l) = f h :>> f l
+
+instance Traversable Term where
+  traverse f (T x) = T <$> f x
+  traverse f (h :> args) = liftA2 (:>) (f h) (traverse (traverse f) args)
+  traverse f (h :>> l) = liftA2 (:>>) (f h) (f l)
 -- instance Show Term where
 --   show (Var (P x))   = "$p" ++ show x
 --   show (Var (X x))   = "$x" ++ show x

@@ -283,7 +283,7 @@ symbolOrVar name = getLSymbol name >>= \case
   Nothing -> getPVar name
 
 -- | Parser of integers
-intParser :: NameSpace m => Parser m Int
+intParser :: NameSpace m => Parser m Integer
 intParser = fromInteger <$> naturalParser
 
 extVarParser :: NameSpace m => Parser m Expr
