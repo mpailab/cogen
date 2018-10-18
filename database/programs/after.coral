@@ -14,7 +14,7 @@ f arg thrm =
 
           Efgh = f` x y
           c = (\x -> 
-              f` (x x)
+              f` (add` x x)
           )` [a, b, c]
           Abcd = (if a then h else f)` (y` abcd)
           Identification << (\list__ b__ -> 

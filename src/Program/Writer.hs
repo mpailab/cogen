@@ -31,7 +31,7 @@ import           LSymbol
 import           Program
 import           Term
 import           Utils
-
+import           Program.BuiltIn
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
@@ -87,7 +87,8 @@ instance Write Expr where
   writeI _ (Bool x) = return $ show x
   writeI par (Term t) = writeI par t
   writeI _ (Var n) = writeVar n
-  writeI _ (Sym s) = nameLSymbol s
+  writeI _ (Sym (SL s)) = nameLSymbol (SL s)
+  writeI _ (Sym (IL s)) = return $ nameBuiltIn s
   writeI _ Any = return "_"
   writeI _ AnySeq = return "__"
   writeI par (Call h args) = inpars par $

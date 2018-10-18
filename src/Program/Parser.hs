@@ -19,6 +19,7 @@ where
 
 -- External imports
 import           Control.Monad.State
+import           Control.Monad.Identity
 import           Data.Char
 import           Data.Functor
 import           Data.List
@@ -42,6 +43,7 @@ import           LSymbol
 import           Program
 import           Term
 import           Utils
+import           Program.BuiltIn
 
 ------------------------------------------------------------------------------------------
 -- Data types and classes declaration
@@ -183,7 +185,8 @@ coralDef = emptyDef
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , reservedOpNames= ["=", "<-", "@", "&&", "||", "|", "+", "++", "-", "*", "/", "&", "$", "<<", "~=", ".."]
+  , reservedOpNames= ["=", "<-", "@", "&&", "||", "|",
+       "+", "++", "-", "*", "/", "&", "$", "<<", "~=", ".."] ++ (fname . fst <$> concat getBuiltInOps)
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "True", "False", "no", "eq", "ne", "in",
                       "then", "else",
@@ -514,22 +517,31 @@ tableBool = [ [Prefix (dbg "try parse no" >> reservedParser "no"  >> return pNot
             ]
 
 tableExpr ::  NameSpace m => [[Operator Text.Text PState m Expr]]
-tableExpr = [ [Infix  (dbg "try parse ^" >> op False "^") AssocRight]
-            , [Infix  (dbg "try parse *" >> op True "*") AssocLeft
-              ,Infix  (dbg "try parse /" >> op False "/") AssocLeft]
-            , [Infix  (dbg "try parse +" >> op True "+") AssocLeft
-              ,Infix  (dbg "try parse -" >> op False "-") AssocLeft]
-            , [Infix  (dbg "try parse :" >> op False ":") AssocRight]
-            , [Infix  (dbg "try parse ++" >> op True "++")  AssocRight]
-            ] where op assoc name = reservedOpParser name >> makeBinOp assoc name
+tableExpr = map (map makeOp) getBuiltInOps
+-- tableExpr = [ [Infix  (dbg "try parse ^" >> op False "^") AssocRight]
+--             , [Infix  (dbg "try parse *" >> op True "*") AssocLeft
+--               ,Infix  (dbg "try parse /" >> op False "/") AssocLeft]
+--             , [Infix  (dbg "try parse +" >> op True "+") AssocLeft
+--               ,Infix  (dbg "try parse -" >> op False "-") AssocLeft]
+--             , [Infix  (dbg "try parse :" >> op False ":") AssocRight]
+--             , [Infix  (dbg "try parse ++" >> op True "++")  AssocRight]
+--             ] where op assoc name = reservedOpParser name >> makeBinOp assoc name
 
-makeBinOp :: NameSpace m => Bool -> String -> Parser m (Expr -> Expr -> Expr)
-makeBinOp assoc name = do {
-  ; s <- getLSymbol name
-  ; op <- case s of {Just x -> return x; _ -> parserZero <?> "unknown operator "++name}
-  ; return (\x y -> Call (Sym op) (args op x++args op y))
-} where args op t@(Call (Sym o) a) = if o==op then a else [t]
-        args _ t                   = [t]
+makeOp :: NameSpace m => (BIFunc Identity, Int) -> Operator Text.Text PState m Expr
+makeOp (bf,num) =
+  if arity (fun bf) == 2
+  then Infix ((dbg $ "try parse "++fname bf) >> reservedOpParser (fname bf) >> makeBinOp (commut bf) num (funct $ fun bf)) (assoc bf)
+  else Prefix ((dbg $ "try parse "++fname bf) >> reservedOpParser (fname bf) >> makeUnOp (commut bf) num (funct $ fun bf))
+
+makeBinOp :: NameSpace m => Int -> Int -> ([Expr] -> Identity Expr) -> Parser m (Expr -> Expr -> Expr)
+makeBinOp 0 op _ = return (\x y -> Call (Sym (IL op)) [x, y])
+makeBinOp 1 op _ = return (\x y -> Call (Sym (IL op)) (args op x++args op y))
+           where args op t@(Call (Sym (IL o)) a) = if o==op then a else [t]
+                 args _ t                   = [t]
+makeBinOp 2 op f = return (\x y -> runIdentity (f [x,y]))
+
+makeUnOp 0 op _ = return (\x -> Call (Sym (IL op)) [x])
+makeUnOp 2 op f = return (\x -> runIdentity (f [x]))
 
 vexprParser :: NameSpace m => Parser m Expr
 vexprParser = buildExpressionParser tableExpr atomExprParser

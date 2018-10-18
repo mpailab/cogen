@@ -12,7 +12,7 @@ f arg thrm =
             x eq y      -- comment 3
           f = \x y -> x++y
           Efgh = x `f` y -- call f x y
-          c = (\x -> f` x x)` [a,b,c]
+          c = (\x -> f` x + x)` [a,b,c]
           Abcd = (if a then h else f)` abcd `y
           Identification << {<
             describe = type

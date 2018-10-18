@@ -18,6 +18,9 @@ module Program.BuiltIn
     (
       -- exports
       getBuiltInFunc,
+      getBuiltInOps,
+      nameBuiltIn,
+      BIFunc(..),
       BuiltInFunc(..)
     )
 where
@@ -30,6 +33,7 @@ import           Data.Array
 import           Data.Bits
 import           Data.List
 import           Control.Monad.Identity
+import           Text.Parsec.Expr
 
 -- Internal imports
 import           Expr
@@ -75,22 +79,32 @@ instance IExpr Expr where
 class ExprFunc a where
   cbi :: Monad m => a -> [Expr] -> m Expr
   cnt :: (Int -> a) -> Int
+  isb :: (Int -> a) -> Bool
 
 instance ExprFunc Expr where
   cbi ff _ = return ff
   cnt _ = 0
+  isb _ = False
 
 instance ExprFunc Integer where
   cbi i _ = return (Int i)
   cnt _ = 0
+  isb _ = False
+
+instance ExprFunc Bool where
+  cbi i _ = return (Bool i)
+  cnt _ = 0
+  isb _ = True
 
 instance IExpr t => ExprFunc [t] where
   cbi l _ = return (List $ map toExpr l)
   cnt _ = 0
+  isb _ = False
 
 instance (ExprFunc f, IExpr t) => ExprFunc (t -> f) where
   cbi ff (x:args) = cbi (ff $ fromExpr x) $ args
-  cnt ff = cnt (\_ -> ff 0 $ fromExpr NONE) -- ^ create dummy function of new type
+  cnt ff = 1 + cnt (\_ -> ff 0 $ fromExpr NONE) -- ^ create dummy function of new type
+  isb ff = isb (\_ -> ff 0 $ fromExpr NONE) -- ^ create dummy function of new type
 
 type BuiltInFuncs m = M.Map Int (BuiltInFunc m)
 type FuncNames = M.Map String Int
@@ -99,8 +113,12 @@ convf :: (Monad m, ExprFunc f) => f -> BuiltInFunc m
 convf f = BuiltInFunc { arity = cnt (\_ -> f), funct = cbi f}
 
 data BIFunc m = BIFunc {
-  name :: String,
+  fname :: String,
+  altname :: String,
   prior :: Int,
+  assoc :: Assoc,
+  commut :: Int, -- ^ 0 : not commutative, 1 : commutative, 2 : apply in parser
+  isbool :: Bool,
   fun :: BuiltInFunc m,
   isOp :: Bool
 }
@@ -114,7 +132,7 @@ data FuncInfo m = FuncInfo {
 registerFunctions :: Monad m => [BIFunc m] -> FuncInfo m
 registerFunctions l = FuncInfo {
                                 funcs = listArray (0,len-1) l,
-                                names = M.fromList $ zip (name <$> l) [0..len-1],
+                                names = M.fromList $ zip (fname <$> l) [0..len-1],
                                 nf = len
                              }
                              where len = length l
@@ -122,37 +140,51 @@ registerFunctions l = FuncInfo {
 type Bin m = m -> m -> m
 type Un m = m -> m
 
-op :: (Monad m, ExprFunc f) => String -> Int -> f -> BIFunc m
-op nm pr f = BIFunc {
-  name = nm,
+op :: (Monad m, ExprFunc f) => Assoc -> Int -> String -> String -> Int -> f -> BIFunc m
+op a c nm altnm pr f = BIFunc {
+  fname = nm,
+  altname = altnm,
   prior = pr,
+  assoc = a,
+  commut = c,
   fun = convf f,
+  isbool = isb (\_ ->f),
   isOp = True
 }
 
 bfun :: (Monad m, ExprFunc f) => String -> f -> BIFunc m
 bfun nm f = BIFunc {
-  name = nm,
+  fname = nm,
+  altname = nm,
   prior = 0,
+  assoc = AssocLeft,
+  commut = 0,
   fun = convf f,
+  isbool = isb (\_ ->f),
   isOp = False
 }
 
 builtIn :: Monad m => FuncInfo m
 builtIn = registerFunctions [
     --(".",   convf (\f g -> ))
-    op "~" 10 (complement :: Un Integer),
-    op "^"   8  ((^) :: Bin Integer),
-    op "*"   7  ((*) :: Bin Integer),
-    op "/"   7  (quot :: Bin Integer),
-    op "%"   7  (rem :: Bin Integer),
-    op ".&." 7  ((.&.) :: Bin Integer),
-    op "+"   6  ((+) :: Bin Integer),
-    op "-"   6  ((-) :: Bin Integer),
-    op ".^." 6  (xor :: Bin Integer),
-    op "++"  5  ((++) :: Bin [Expr]),
-    op ".|." 5  ((.|.) :: Bin Integer),
-    op "$"   0  (\x y -> Call x [y]),
+    --op "~"  10 (complement :: Un Integer),
+    op AssocRight 0 "^"  "pow"       8  ((^)  :: Bin Integer),
+    op AssocLeft  1 "*"  "mul"       7  ((*)  :: Bin Integer),
+    op AssocLeft  0 "/"  "quot"      7  (quot :: Bin Integer),
+    op AssocLeft  0 "%"  "mod"       7  (rem  :: Bin Integer),
+    op AssocLeft  1 ".&." "bitand"   7  ((.&.) :: Bin Integer),
+    op AssocLeft  1 "+"   "add"      6  ((+)  :: Bin Integer),
+    op AssocLeft  0 "-"   "subtract" 6  ((-)  :: Bin Integer),
+    op AssocLeft  1 ".^." "xor"      6  (xor  :: Bin Integer),
+    op AssocLeft  1 "++"  "concat"   5  ((++) :: Bin [Expr]),
+    op AssocLeft  1 ".|." "bitor"    5  ((.|.) :: Bin Integer),
+    op AssocLeft  0 "<="  "leq"      4  ((<=) :: Expr->Expr->Bool),
+    op AssocLeft  0 "<"   "lt"       4  ((<)  :: Expr->Expr->Bool),
+    op AssocLeft  0 ">="  "geq"      4  ((>=) :: Expr->Expr->Bool),
+    op AssocLeft  0 ">"   "gt"       4  ((>)  :: Expr->Expr->Bool),
+    op AssocLeft  0 "=="  "eq"       3  ((==) :: Expr->Expr->Bool),
+    op AssocLeft  0 "!="  "neq"      3  ((/=) :: Expr->Expr->Bool),
+    op AssocRight 2 "$"   "apply"    0  (\x y -> Call x [y]),
     bfun "header" (header :: Term Expr -> Expr)
   ]
 
@@ -160,6 +192,8 @@ getBuiltInFunc :: Monad m => Int -> Maybe (BuiltInFunc m)
 getBuiltInFunc i = if i < length f then Just . fun $ f ! i else Nothing
                    where f = funcs builtIn
 
-getBuiltInOps :: [[(String,Int)]]
-getBuiltInOps = map (map (\(x,n) -> (name x,n))) $ groupBy (\(x,_) (y,_) -> prior x == prior y) $ filter (\(x,_) -> isOp x) $ zip (elems $ funcs bi) [0..nf bi -1]
+getBuiltInOps :: [[(BIFunc Identity,Int)]]
+getBuiltInOps = groupBy (\(x,_) (y,_) -> prior x == prior y) $ filter (\(x,_) -> isOp x) $ zip (elems $ funcs bi) [0..nf bi -1]
                 where bi = (builtIn :: FuncInfo Identity)
+
+nameBuiltIn s = altname $ funcs (builtIn :: FuncInfo Identity) ! s
