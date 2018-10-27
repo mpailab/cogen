@@ -56,6 +56,10 @@ instance IExpr Integer where
   fromExpr (Int x) = x
   toExpr = Int
 
+instance IExpr Bool where
+  fromExpr (Bool x) = x
+  toExpr = Bool
+
 instance IExpr Int where
   fromExpr (Int x) = fromInteger x
   toExpr = Int . toInteger
@@ -168,6 +172,8 @@ builtIn :: Monad m => FuncInfo m
 builtIn = registerFunctions [
     --(".",   convf (\f g -> ))
     --op "~"  10 (complement :: Un Integer),
+    --op AssocRight 0 "!"  "not"       10 not,
+    op AssocRight 0 "-"  "neg"       10 (negate :: Un Integer),
     op AssocRight 0 "^"  "pow"       8  ((^)  :: Bin Integer),
     op AssocLeft  1 "*"  "mul"       7  ((*)  :: Bin Integer),
     op AssocLeft  0 "/"  "quot"      7  (quot :: Bin Integer),
@@ -184,7 +190,8 @@ builtIn = registerFunctions [
     op AssocLeft  0 ">"   "gt"       4  ((>)  :: Expr->Expr->Bool),
     op AssocLeft  0 "=="  "eq"       3  ((==) :: Expr->Expr->Bool),
     op AssocLeft  0 "!="  "neq"      3  ((/=) :: Expr->Expr->Bool),
-    op AssocRight 2 "$"   "apply"    0  (\x y -> Call x [y]),
+    --op AssocLeft  0 "in"  "member"   3  ()
+    --op AssocRight 2 "$"   "apply"    0  (\x y -> Call x [y]),
     bfun "header" (header :: Term Expr -> Expr)
   ]
 
