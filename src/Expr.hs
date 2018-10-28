@@ -63,11 +63,11 @@ data Expr
   | CaseOf Expr [(Expr, Expr)] -- ^ switching expression
 
   -- Composite expressions:
-  | Term  TExpr                -- ^ term over expressions
-  | Alt   [Expr]               -- ^ alternating of expressions
-  | Tuple [Expr]               -- ^ tuple of expressions
-  | List  [Expr]               -- ^ list of expressions
-  | Set   [Expr]               -- ^ set of expressions
+  | Term  { getTerm :: TExpr }  -- ^ term over expressions
+  | Alt   [Expr]                -- ^ alternating of expressions
+  | Tuple [Expr]                -- ^ tuple of expressions
+  | List  { getList :: [Expr] } -- ^ list of expressions
+  | Set   [Expr]                -- ^ set of expressions
 
   -- Functional expressions:
   | Call Expr  [Expr]    -- ^ partial function call
@@ -80,10 +80,11 @@ data Expr
 
 -- | type of assigning
 data Assign
-  = Simple
-  | Select -- ^ match patterns with list elements (l1,...,lN <- right)
-  | Unord  -- ^ match list pattern with list of elements in any order (left ~= right)
-  | Append -- ^ appends right part to variable (left << right)
+  = Simple  -- ^ match a pattern with en expression (left = right | cond)
+  | Select  -- ^ match patterns with list elements ([l1,...,lN] <- right)
+  | Iterate -- ^ match a pattern with a result of iterating expression (left <= right)
+  | Unord   -- ^ match list pattern with list of elements in any order (left ~= right)
+  | Append  -- ^ appends right part to variable (left << right)
   deriving (Eq, Ord)
 
 instance Show Assign where
