@@ -48,13 +48,14 @@ instance Handle a => Handle (Expr -> a) where
                                in handle (Fun xs (cmd:cmds))
 
 type Values = M.Map Var Expr
-type Swap = forall m . Monad m => Expr -> m Expr
+type Swap = forall m . Monad m => Expr -> m ()
 type Swaps = M.Map Var Swap
 
 newtype Info = Info
   {
     vals :: Values,
     swaps :: Swaps,
+    is_swap :: Bool,
     l_sw :: Swap,
     r_sw :: Swap
   }
@@ -142,34 +143,40 @@ getVal x = get >>= \info -> return (M.lookup x (vals info))
 setVal :: Monad m => Int -> Expr -> Handler m Expr
 setVal x v = modify (\info -> info {vals = M.insert x v (vals info)}) >> return v
 
-getSwap :: Monad m => Var -> Handler m Swap
-getSwap x = get >>= \info -> return (M.lookup x (swaps info))
-
-setSwap :: Monad m => Int -> Expr -> Handler m ()
-setSwap x sw = modify (\info -> info {swaps = M.insert x sw (swaps info)})
-
 getPtr :: Monad m => Var -> Handler m (Maybe (Expr, Swap))
-getPtr x = getVal x >>= \case
-  Just e -> getSwap x >>= \case
-    Just sw -> return (Just (e,sw))
-    Nothing -> return Nothing
-  Nothing -> return Nothing
+getPtr x = get >>= \info -> case (M.lookup x (vals info), M.lookup x (swaps info))
+  (Just e, Just sw) -> return (Just (e,sw))
+  _                 -> return Nothing
 
 setPtr :: Monad m => Int -> Expr -> Swap -> Handler m Expr
 setPtr x v sw = modify (\info -> info { vals = M.insert x v (vals info);
                                         swaps = M.insert x sw (swaps info) }) >> return v
 
 getLSw :: Monad m => Handler m Swap
-getLSw = get >>= \ info -> return (l_sw info)
+getLSw = get >>= \ info -> guard (is_swap info) >> return (l_sw info)
 
 setLSw :: Monad m => Swap -> Handler m ()
-setLSw sw = modify (\ info -> info { r_sw = sw })
+setLSw sw = modify (\ info -> info { is_swap = True; l_sw = sw })
 
 getRSw :: Monad m => Handler m Swap
-getRSw = get >>= \ info -> return (r_sw info)
+getRSw = get >>= \ info -> guard (is_swap info) >> return (r_sw info)
 
 setRSw :: Monad m => Swap -> Handler m ()
-setRSw sw = modify (\ info -> info { r_sw = sw })
+setRSw sw = modify (\ info -> info { is_swap = True; r_sw = sw })
+
+getSwap :: Monad m => Handler m Swap
+getSwap = getLSw
+{-# INLINE getSwap #-}
+
+setSwap :: Monad m => Swap -> Handler m ()
+setSwap = setLSw
+{-# INLINE setSwap #-}
+
+resetSwap :: Monad m => Handler m ()
+resetSwap = modify (\ info -> info { is_swap = False })
+
+transpose :: Monad m => Handler m ()
+transpose = getLSw >>= \ l_sw -> getRSw >>= setLSw >> setRSw l_sw
 
 putError :: Monad m => forall a . String -> Handler m a
 putError str = Handler $ \ s -> return (Error str, s)
@@ -266,47 +273,46 @@ evalCall (Fun (x:xs) cmds) (a:as) = let c = Assign Simple x a NONE
                                   in evalCall (Fun xs (c:cmds)) as
 evalCall e as = putError "call an undefined function"
 
+reverseConcat :: [a] -> [a] -> [a]
+reverseConcat [] ys = ys
+reverseConcat (x:xs) ys = reverseConcat xs (x:ys)
 
 ident :: Monad m => Expr -> Expr -> Handler m Expr
 
-ident (Alt xs) y = foldr ((<|>) . (`ident`y)) empty xs
-ident x (Alt ys) = foldr ((<|>) . ident x) empty ys
+ident (Alt []) y = empty
+ident (Alt (x:xs)) y = getSwap >>= \sw -> (
+  ( setSwap (\ a -> sw $ Alt (a:xs)) >> ident x y ) <|>
+  ( setSwap (\ (Alt as) -> sw $ Alt (x:as)) >> ident (Alt xs) y ) )
+ident x (Alt ys) = transpose >> ident (Alt ys) x
 
 ident Any y = return y
 ident x Any = return x
 
 ident (Var i) y = getVal i >>= \case
-  Just x  -> setLSw (setVal i) >> ident x y
+  Just x  -> setSwap (setVal i) >> ident x y
   Nothing -> setVal i y
+ident x (Var i) = transpose >> ident (Var i) x
 
-ident x (Var i) = getVal i >>= \case
-  Just y  -> setRSw (setVal i) >> ident x y
-  Nothing -> setVal i x
-
-ident (Ptr i x) y = getRSw >>= \sw -> ident x y >>= \e -> setPtr i e sw
-
-ident x (Ptr i y) = getLSw >>= \sw -> ident x y >>= \e -> setPtr i e sw
+ident (Ptr i x) y = getSwap >>= \sw -> ident x y >>= \e -> setPtr i e sw
+ident x (Ptr i y) = transpose >> ident (Ptr i y) x
 
 ident (Ref i x) y = ident x y >>= setVal i
-
 ident x (Ref i y) = ident x y >>= setVal i
 
-ident (IfElse c t f) y = evalB c >>= \case
-  True  -> ident t y
-  False -> ident f y
-
-ident x (IfElse c t f) = evalB c >>= \case
-  True  -> ident x t
-  False -> ident x f
+ident (IfElse c t f) y = getSwap >>= \sw -> evalB c >>= \case
+  True  -> setSwap (\e -> sw $ IfElse c e f) >> ident t y
+  False -> setSwap (\e -> sw $ IfElse c t e) >> ident f y
+ident x (IfElse c t f) = transpose >> ident (IfElse c t f) x
 
 ident (CaseOf e []) y = empty
-ident (CaseOf e ((p,x):cmds)) y = (ident e p >> ident x y) <|> ident (CaseOf e cmds) y
+ident (CaseOf e ((p,x):cs)) y = getSwap >>= \sw -> (
+  ( ( setSwap (\a -> sw $ CaseOf e ((a,x):cs)) >> ident e p ) >>
+    ( setSwap (\a -> sw $ CaseOf e ((p,a):cs)) >> ident x y ) ) <|>
+  ( setSwap (\(CaseOf a as) -> sw $ CaseOf a ((p,x):as)) >> ident (CaseOf e cs) y ) )
+ident x (CaseOf e cs) = transpose >> ident (CaseOf e cs) x
 
-ident x (CaseOf e []) = empty
-ident x (CaseOf e ((p,y):cmds)) = (ident e p >> ident x y) <|> ident x (CaseOf e cmds)
-
-ident x@(Call _ _) y = eval x >>= \e -> ident e y
-ident x y@(Call _ _) = eval y >>= \e -> ident x e
+ident x@(Call _ _) y = eval x >>= \e -> resetSwap >> ident e y
+ident x y@(Call _ _) = eval y >>= \e -> resetSwap >> ident x e
 
 ident (Sym x) (Sym y) = if x == y
   then return (Sym x)
@@ -316,10 +322,30 @@ ident (Int x) (Int y) = if x == y
   then return (Int x)
   else putError "integers are not equal"
 
-ident (Term (T x)) (Term (T y)) = Term . T <$> ident x y
-ident (Term (T x))   y@(Term _) = ident x y
-ident   x@(Term _) (Term (T y)) = ident x y
+ident (Term (T x)) (Term (T y)) =
+  getLSw >>= \ lsw ->
+  getRSw >>= \ rsw ->
+  Term . T <$> ( setLSw (\a -> lsw $ Term (T a)) >>
+                 setRSw (\a -> rsw $ Term (T a)) >>
+                 ident x y )
+ident (Term (T x))   y@(Term _) =
+  getLSw >>= \ lsw ->
+  getRSw >>= \ rsw ->
+  setLSw (\a -> lsw $ Term (T a)) >>
+  setRSw (\a -> rsw $ Term a) >>
+  ident x y
+ident   x@(Term _) (Term (T y)) =
+  getLSw >>= \ lsw ->
+  getRSw >>= \ rsw ->
+  Term . T <$> ( setLSw (\a -> lsw $ Term a) >>
+                 setRSw (\a -> rsw $ Term (T a)) >>
+                 ident x y )
 ident (Term (x :> xs)) (Term (y :> ys)) =
+  getLSw >>= \ lsw ->
+  getRSw >>= \ rsw ->
+  Term . T <$> ( setLSw (\(List (a:as)) -> lsw $ Term (a :> map getTerm as)) >>
+                 setRSw (\(List (a:as)) -> rsw $ Term (a :> map getTerm as)) >>
+                 ident x y )
   ident (List (x : map Term xs)) (List (y : map Term ys)) >>=
   \ ~(List (e:es)) -> return (Term (e :> map getTerm es))
 
