@@ -48,11 +48,15 @@ instance Handle a => Handle (Expr -> a) where
                                in handle (Fun xs (cmd:cmds))
 
 type Values = M.Map Var Expr
+type Swap = forall m . Monad m => Expr -> m Expr
+type Swaps = M.Map Var Swap
 
 newtype Info = Info
   {
-    vals :: Values
-    -- swap :: SExpr
+    vals :: Values,
+    swaps :: Swaps,
+    l_sw :: Swap,
+    r_sw :: Swap
   }
 
 data Eval a
@@ -137,6 +141,35 @@ getVal x = get >>= \info -> return (M.lookup x (vals info))
 
 setVal :: Monad m => Int -> Expr -> Handler m Expr
 setVal x v = modify (\info -> info {vals = M.insert x v (vals info)}) >> return v
+
+getSwap :: Monad m => Var -> Handler m Swap
+getSwap x = get >>= \info -> return (M.lookup x (swaps info))
+
+setSwap :: Monad m => Int -> Expr -> Handler m ()
+setSwap x sw = modify (\info -> info {swaps = M.insert x sw (swaps info)})
+
+getPtr :: Monad m => Var -> Handler m (Maybe (Expr, Swap))
+getPtr x = getVal x >>= \case
+  Just e -> getSwap x >>= \case
+    Just sw -> return (Just (e,sw))
+    Nothing -> return Nothing
+  Nothing -> return Nothing
+
+setPtr :: Monad m => Int -> Expr -> Swap -> Handler m Expr
+setPtr x v sw = modify (\info -> info { vals = M.insert x v (vals info);
+                                        swaps = M.insert x sw (swaps info) }) >> return v
+
+getLSw :: Monad m => Handler m Swap
+getLSw = get >>= \ info -> return (l_sw info)
+
+setLSw :: Monad m => Swap -> Handler m ()
+setLSw sw = modify (\ info -> info { r_sw = sw })
+
+getRSw :: Monad m => Handler m Swap
+getRSw = get >>= \ info -> return (r_sw info)
+
+setRSw :: Monad m => Swap -> Handler m ()
+setRSw sw = modify (\ info -> info { r_sw = sw })
 
 putError :: Monad m => forall a . String -> Handler m a
 putError str = Handler $ \ s -> return (Error str, s)
@@ -243,16 +276,16 @@ ident Any y = return y
 ident x Any = return x
 
 ident (Var i) y = getVal i >>= \case
-  Just x  -> ident x y
+  Just x  -> setLSw (setVal i) >> ident x y
   Nothing -> setVal i y
 
 ident x (Var i) = getVal i >>= \case
-  Just y  -> ident x y
+  Just y  -> setRSw (setVal i) >> ident x y
   Nothing -> setVal i x
 
-ident (Ptr i x) y = ident x y >>= setVal i
+ident (Ptr i x) y = getRSw >>= \sw -> ident x y >>= \e -> setPtr i e sw
 
-ident x (Ptr i y) = ident x y >>= setVal i
+ident x (Ptr i y) = getLSw >>= \sw -> ident x y >>= \e -> setPtr i e sw
 
 ident (Ref i x) y = ident x y >>= setVal i
 
