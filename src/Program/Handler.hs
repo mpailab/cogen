@@ -44,7 +44,7 @@ instance Monad m => Handle (m Expr) where
   handle e = evalHandler (eval e) (Info M.empty M.empty)
 
 instance Handle a => Handle (Expr -> a) where
-  handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x e NONE
+  handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x e (Bool True)
                                in handle (Fun xs (cmd:cmds))
 
 type Values = M.Map Var Expr
@@ -212,6 +212,7 @@ eval (Set xs)   = Set   <$> mapM eval xs
 
 eval (Call f args) = evalCall f args
 
+eval (Fun [] cs) = run cs (return NONE)
 eval (Fun _ _) = putError "can't evaluate a function definition"
 
 eval NONE = putError "can't evaluate an undefined expression"

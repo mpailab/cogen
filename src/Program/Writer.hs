@@ -189,6 +189,7 @@ writePrefx x y wr = (x ++ " ") +>+ (unwords <$> mapM wr y)
 writeInfx :: NameSpace m => String -> [a] -> (a -> m String) -> m String
 writeInfx x y wr = intercalate (" " ++ x ++ " ") <$> mapM wr y
 
+inpars :: Monad m => Bool -> m String -> m String
 inpars par str = if par then "(" +>+ str +<+ ")"  else str
 
 

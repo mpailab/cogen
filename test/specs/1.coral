@@ -1,0 +1,10 @@
+\ x ->
+  case x of
+    context [forall]
+    do
+      context [forall, forall]
+    done
+    _
+    do
+      context [forall]
+    done
