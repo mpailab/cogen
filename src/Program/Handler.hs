@@ -41,23 +41,20 @@ class Handle a where
   handle :: Expr -> a
 
 instance Monad m => Handle (m Expr) where
-  handle e = evalHandler (eval e) (Info M.empty)
+  handle e = evalHandler (eval e) (Info M.empty M.empty)
 
 instance Handle a => Handle (Expr -> a) where
   handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x e NONE
                                in handle (Fun xs (cmd:cmds))
 
 type Values = M.Map Var Expr
-type Swap = forall m . Monad m => Expr -> m ()
-type Swaps = M.Map Var Swap
+type Swap m  = Expr -> Handler m ()
+type Swaps m = M.Map Var (Swap m)
 
-newtype Info = Info
+data Info m = Info
   {
-    vals :: Values,
-    swaps :: Swaps,
-    is_swap :: Bool,
-    l_sw :: Swap,
-    r_sw :: Swap
+    vals  :: Values,
+    swaps :: Swaps m
   }
 
 data Eval a
@@ -68,9 +65,9 @@ instance Functor Eval where
   fmap f (Value a)   = Value (f a)
   fmap f (Error err) = Error err
 
-newtype Handler m a = Handler { runHandler :: Info -> m (Eval a, Info) }
+newtype Handler m a = Handler { runHandler :: Info m -> m (Eval a, Info m) }
 
-evalHandler :: Monad m => Handler m a -> Info -> m a
+evalHandler :: Monad m => Handler m a -> Info m -> m a
 evalHandler m s = runHandler m s >>= \ ~(a, _) -> case a of
   Value x   -> return x
   Error err -> error $ "Handler error: " ++ err ++ ".\n"
@@ -129,7 +126,7 @@ instance MonadIO m => MonadIO (Handler m) where
   liftIO = lift . liftIO
   {-# INLINE liftIO #-}
 
-instance Monad m => MonadState Info (Handler m) where
+instance Monad m => MonadState (Info m) (Handler m) where
   state f = Handler $ \ s -> let ~(a,s') = f s in return (Value a, s')
   get = state $ \ s -> (s, s)
   put s = state $ const ((), s)
@@ -143,46 +140,17 @@ getVal x = get >>= \info -> return (M.lookup x (vals info))
 setVal :: Monad m => Int -> Expr -> Handler m Expr
 setVal x v = modify (\info -> info {vals = M.insert x v (vals info)}) >> return v
 
-getPtr :: Monad m => Var -> Handler m (Maybe (Expr, Swap))
-getPtr x = get >>= \info -> case (M.lookup x (vals info), M.lookup x (swaps info))
+getPtr :: Monad m => Var -> Handler m (Maybe (Expr, Swap m))
+getPtr x = get >>= \info -> case (M.lookup x (vals info), M.lookup x (swaps info)) of
   (Just e, Just sw) -> return (Just (e,sw))
   _                 -> return Nothing
 
-setPtr :: Monad m => Int -> Expr -> Swap -> Handler m Expr
-setPtr x v sw = modify (\info -> info { vals = M.insert x v (vals info);
+setPtr :: Monad m => Int -> Expr -> Swap m -> Handler m Expr
+setPtr x v sw = modify (\info -> info { vals = M.insert x v (vals info),
                                         swaps = M.insert x sw (swaps info) }) >> return v
-
-getLSw :: Monad m => Handler m Swap
-getLSw = get >>= \ info -> guard (is_swap info) >> return (l_sw info)
-
-setLSw :: Monad m => Swap -> Handler m ()
-setLSw sw = modify (\ info -> info { is_swap = True; l_sw = sw })
-
-getRSw :: Monad m => Handler m Swap
-getRSw = get >>= \ info -> guard (is_swap info) >> return (r_sw info)
-
-setRSw :: Monad m => Swap -> Handler m ()
-setRSw sw = modify (\ info -> info { is_swap = True; r_sw = sw })
-
-getSwap :: Monad m => Handler m Swap
-getSwap = getLSw
-{-# INLINE getSwap #-}
-
-setSwap :: Monad m => Swap -> Handler m ()
-setSwap = setLSw
-{-# INLINE setSwap #-}
-
-resetSwap :: Monad m => Handler m ()
-resetSwap = modify (\ info -> info { is_swap = False })
-
-transpose :: Monad m => Handler m ()
-transpose = getLSw >>= \ l_sw -> getRSw >>= setLSw >> setRSw l_sw
 
 putError :: Monad m => forall a . String -> Handler m a
 putError str = Handler $ \ s -> return (Error str, s)
-
--- swapArg :: Monad m => Int -> Expr -> Handler m ()
--- swapArg x y = modify (\info -> info {args = M.insert x y (args info)})
 
 
 eval :: Monad m => Expr -> Handler m Expr
@@ -273,95 +241,83 @@ evalCall (Fun (x:xs) cmds) (a:as) = let c = Assign Simple x a NONE
                                   in evalCall (Fun xs (c:cmds)) as
 evalCall e as = putError "call an undefined function"
 
-reverseConcat :: [a] -> [a] -> [a]
-reverseConcat [] ys = ys
-reverseConcat (x:xs) ys = reverseConcat xs (x:ys)
-
 ident :: Monad m => Expr -> Expr -> Handler m Expr
+ident x y = identI x (\_ -> return ()) y (\_ -> return ())
 
-ident (Alt []) y = empty
-ident (Alt (x:xs)) y = getSwap >>= \sw -> (
-  ( setSwap (\ a -> sw $ Alt (a:xs)) >> ident x y ) <|>
-  ( setSwap (\ (Alt as) -> sw $ Alt (x:as)) >> ident (Alt xs) y ) )
-ident x (Alt ys) = transpose >> ident (Alt ys) x
+identI :: Monad m => Expr -> Swap m -> Expr -> Swap m -> Handler m Expr
 
-ident Any y = return y
-ident x Any = return x
+identI (Alt []) lsw y rsw = empty
+identI (Alt (x:xs)) lsw y rsw =
+  identI x (\ a -> lsw $ Alt (a:xs)) y rsw <|>
+  identI (Alt xs) (\ ~(Alt as) -> lsw $ Alt (x:as)) y rsw
+identI x lsw (Alt ys) rsw = identI (Alt ys) rsw x lsw
 
-ident (Var i) y = getVal i >>= \case
-  Just x  -> setSwap (setVal i) >> ident x y
+identI Any lsw y rsw = return y
+identI x lsw Any rsw = return x
+
+identI (Var i) lsw y rsw = getVal i >>= \case
+  Just x  -> identI x (void . setVal i) y rsw
   Nothing -> setVal i y
-ident x (Var i) = transpose >> ident (Var i) x
+identI x lsw (Var i) rsw = identI (Var i) rsw x lsw
 
-ident (Ptr i x) y = getSwap >>= \sw -> ident x y >>= \e -> setPtr i e sw
-ident x (Ptr i y) = transpose >> ident (Ptr i y) x
+identI (Ptr i x) lsw y rsw = identI x (lsw . Ptr i) y rsw >>= \e -> setPtr i e rsw
+identI x lsw (Ptr i y) rsw = identI (Ptr i y) rsw x lsw
 
-ident (Ref i x) y = ident x y >>= setVal i
-ident x (Ref i y) = ident x y >>= setVal i
+identI (Ref i x) lsw y rsw = identI x (lsw . Ref i) y rsw >>= setVal i
+identI x lsw (Ref i y) rsw = identI (Ref i y) rsw x lsw
 
-ident (IfElse c t f) y = getSwap >>= \sw -> evalB c >>= \case
-  True  -> setSwap (\e -> sw $ IfElse c e f) >> ident t y
-  False -> setSwap (\e -> sw $ IfElse c t e) >> ident f y
-ident x (IfElse c t f) = transpose >> ident (IfElse c t f) x
+identI (IfElse c t f) lsw y rsw = evalB c >>= \case
+  True  -> identI t (\a -> lsw $ IfElse c a f) y rsw
+  False -> identI f (lsw . IfElse c t) y rsw
+identI x lsw (IfElse c t f) rsw = identI (IfElse c t f) rsw x lsw
 
-ident (CaseOf e []) y = empty
-ident (CaseOf e ((p,x):cs)) y = getSwap >>= \sw -> (
-  ( ( setSwap (\a -> sw $ CaseOf e ((a,x):cs)) >> ident e p ) >>
-    ( setSwap (\a -> sw $ CaseOf e ((p,a):cs)) >> ident x y ) ) <|>
-  ( setSwap (\(CaseOf a as) -> sw $ CaseOf a ((p,x):as)) >> ident (CaseOf e cs) y ) )
-ident x (CaseOf e cs) = transpose >> ident (CaseOf e cs) x
+identI (CaseOf e []) lsw y rsw = empty
+identI (CaseOf e ((p,x):cs)) lsw y rsw =
+  ( ident e p >> identI x (\a -> lsw $ CaseOf e ((p,a):cs)) y rsw ) <|>
+  identI (CaseOf e cs) (\ ~(CaseOf a as) -> lsw $ CaseOf a ((p,x):as)) y rsw
+identI x lsw (CaseOf e cs) rsw = identI (CaseOf e cs) rsw x lsw
 
-ident x@(Call _ _) y = eval x >>= \e -> resetSwap >> ident e y
-ident x y@(Call _ _) = eval y >>= \e -> resetSwap >> ident x e
+identI x@(Call _ _) lsw y rsw = eval x >>= \e -> ident e y
+identI x lsw y@(Call _ _) rsw = identI y rsw x lsw
 
-ident (Sym x) (Sym y) = if x == y
+identI (Sym x) _ (Sym y) _ = if x == y
   then return (Sym x)
   else putError "logical symbols are not equal"
 
-ident (Int x) (Int y) = if x == y
+identI (Int x) _ (Int y) _ = if x == y
   then return (Int x)
   else putError "integers are not equal"
 
-ident (Term (T x)) (Term (T y)) =
-  getLSw >>= \ lsw ->
-  getRSw >>= \ rsw ->
-  Term . T <$> ( setLSw (\a -> lsw $ Term (T a)) >>
-                 setRSw (\a -> rsw $ Term (T a)) >>
-                 ident x y )
-ident (Term (T x))   y@(Term _) =
-  getLSw >>= \ lsw ->
-  getRSw >>= \ rsw ->
-  setLSw (\a -> lsw $ Term (T a)) >>
-  setRSw (\a -> rsw $ Term a) >>
-  ident x y
-ident   x@(Term _) (Term (T y)) =
-  getLSw >>= \ lsw ->
-  getRSw >>= \ rsw ->
-  Term . T <$> ( setLSw (\a -> lsw $ Term a) >>
-                 setRSw (\a -> rsw $ Term (T a)) >>
-                 ident x y )
-ident (Term (x :> xs)) (Term (y :> ys)) =
-  getLSw >>= \ lsw ->
-  getRSw >>= \ rsw ->
-  Term . T <$> ( setLSw (\(List (a:as)) -> lsw $ Term (a :> map getTerm as)) >>
-                 setRSw (\(List (a:as)) -> rsw $ Term (a :> map getTerm as)) >>
-                 ident x y )
-  ident (List (x : map Term xs)) (List (y : map Term ys)) >>=
+identI (Term (T x)) lsw (Term (T y)) rsw =
+  Term . T <$> identI x (lsw . Term . T) y (rsw . Term . T)
+identI (Term (T x)) lsw y@(Term _) rsw = identI x (lsw . Term . T) y rsw
+identI x@(Term _) lsw (Term (T y)) rsw = identI x lsw y (lsw . Term . T)
+identI (Term (x :> xs)) lsw (Term (y :> ys)) rsw =
+  identI (List (x : map Term xs))
+        (\ ~(List (a:as)) -> lsw $ Term (a :> map getTerm as))
+        (List (y : map Term ys))
+        (\ ~(List (a:as)) -> rsw $ Term (a :> map getTerm as)) >>=
   \ ~(List (e:es)) -> return (Term (e :> map getTerm es))
 
-ident (Tuple xs) (Tuple ys) = Tuple <$> identLists xs ys
+identI (Tuple xs) lsw (Tuple ys) rsw =
+  Tuple <$> identLists xs (lsw . Tuple) ys (rsw . Tuple)
 
-ident (List xs) (List ys) = List <$> identLists xs ys
+identI (List xs) lsw (List ys) rsw =
+  List <$> identLists xs (lsw . List) ys (rsw . List)
 
-ident (Set xs) (Set ys) = Set <$> identLists xs ys
+identI (Set xs) lsw (Set ys) rsw =
+  Set <$> identLists xs (lsw . Set) ys (rsw . Set)
 
-ident _ _ = putError "an unsupported identification"
+identI _ _ _ _ = putError "an unsupported identification"
 
-identLists :: Monad m => [Expr] -> [Expr] -> Handler m [Expr]
-identLists [] [] = return []
-identLists [] _  = putError "can't identify lists with different lengths"
-identLists _  [] = putError "can't identify lists with different lengths"
-identLists (x:xs) (y:ys) = ident x y >>= \e -> identLists xs ys >>= \es -> return (e:es)
+identLists :: Monad m => [Expr] -> ([Expr] -> Handler m ()) ->
+                         [Expr] -> ([Expr] -> Handler m ()) -> Handler m [Expr]
+identLists [] _ [] _ = return []
+identLists [] _ _ _ = putError "can't identify lists with different lengths"
+identLists _ _ [] _ = putError "can't identify lists with different lengths"
+identLists (x:xs) lsw (y:ys) rsw =
+  identI x (lsw . (:xs)) y (rsw . (:ys)) >>= \e ->
+  identLists xs (lsw . (x:)) ys (rsw . (y:)) >>= \es -> return (e:es)
 
 check :: Monad m => Expr -> Handler m ()
 check e = evalB e >>= \case
