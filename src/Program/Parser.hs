@@ -223,6 +223,12 @@ instance Parse Program where
     Right p   -> return p
     Left  err -> (error . errorToString) err
 
+-- | Parse instance for expressions
+instance Parse Expr where
+  parse str source = runParserT lambdaParser initState source (Text.pack str) >>= \case
+    Right e   -> return e
+    Left  err -> (error . errorToString) err
+
 errorToString :: ParseError -> String
 errorToString err = "Program parser error:\n"
   ++ showPos (errorPos err) ++ "\n"
@@ -614,6 +620,7 @@ data PatternType
   | InListPattern
   deriving (Eq,Show)
 
+pattp :: PatternType -> PatternType -> PatternType
 pattp NoPattern _ = NoPattern
 pattp _ pt        = pt
 
@@ -729,10 +736,10 @@ simpleTermParser = getState >>= (\st -> dbg ("parse term or header : pm = " ++ s
           (dbg "th : try if" >> T <$> ifExprParser True)
       <|> (dbg "th : try case" >> T <$> caseExprParser True)
       <|> (dbg "th : try parens" >> parensParser simpleTermParser >>= \case
-              e@(T (Ref _ _)) -> return e   -- ^ already reference to term
-              e@(T (Ptr _ _)) -> return e   -- ^ already pointer to term
-              T h -> parseTermArgs h    -- ^ only header read which is symbol, conditional expression or function call
-              t  -> return t            -- ^ otherwise it is already a term
+              e@(T (Ref _ _)) -> return e   --  already reference to term
+              e@(T (Ptr _ _)) -> return e   --  already pointer to term
+              T h -> parseTermArgs h    --  only header read which is symbol, conditional expression or function call
+              t  -> return t            --  otherwise it is already a term
           )
       <|> do { dbg "th : try symbol"
              ; sym <- anyElem <|> symbolParser <|> (parensParser lambdaParser <* lookAhead funcApp)
