@@ -377,7 +377,7 @@ simpleVExprParser = dbg "parse vexpr" >> (
                   <|> (compParser >>= \case
                         Term (T v@(Var n)) -> entryTailParser False n <|> return v
                         Term (T t)       -> return t
-                        Tuple [expr]     -> return expr  -- ^ expression in parentheses is parsed as one-element tuple
+                        Tuple [expr]     -> return expr  -- expression in parentheses is parsed as one-element tuple
                         expr             -> return expr
                       )
                   <?> "vexpr")
@@ -449,10 +449,10 @@ simpleTermParser = getState >>= (\st -> dbg ("parse term or header : pm = " ++ s
           (dbg "th : try if" >> T <$> ifExprParser True)
       <|> (dbg "th : try case" >> T <$> caseExprParser True)
       <|> (dbg "th : try parens" >> parensParser simpleTermParser >>= \case
-              e@(T (Ref _ _)) -> return e   -- ^ already reference to term
-              e@(T (Ptr _ _)) -> return e   -- ^ already pointer to term
-              T h -> parseTermArgs h    -- ^ only header read which is symbol, conditional expression or function call
-              t  -> return t            -- ^ otherwise it is already a term
+              e@(T (Ref _ _)) -> return e   --  already reference to term
+              e@(T (Ptr _ _)) -> return e   --  already pointer to term
+              T h -> parseTermArgs h    --  only header read which is symbol, conditional expression or function call
+              t  -> return t            --  otherwise it is already a term
           )
       <|> do { dbg "th : try symbol"
              ; sym <- anyElem <|> symbolParser <|> (parensParser lambdaParser <* lookAhead funcApp)

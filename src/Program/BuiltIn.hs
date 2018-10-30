@@ -90,7 +90,7 @@ instance IExpr t => ExprFunc [t] where
 
 instance (ExprFunc f, IExpr t) => ExprFunc (t -> f) where
   cbi ff (x:args) = cbi (ff $ fromExpr x) $ args
-  cnt ff = cnt (\_ -> ff 0 $ fromExpr NONE) -- ^ create dummy function of new type
+  cnt ff = cnt (\_ -> ff 0 $ fromExpr NONE) -- create dummy function of new type
 
 type BuiltInFuncs m = M.Map Int (BuiltInFunc m)
 type FuncNames = M.Map String Int
