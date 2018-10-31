@@ -141,6 +141,8 @@ instance Write Command where
 
   writeI _ (Assign Append pat (List frags) cond) =
       indent +<>+ write0 pat +<>+ writeSequenceS "" frags (\f -> show Append +>+ write0 f) +<>+ writeWhereCond cond
+  writeI _ (Assign ReplLoc pat e cond) = 
+    indent +<>+ "let " +>+ write0 pat +<>+ " = " +>+ write0 e +<>+ writeWhereCond cond
 
   writeI _ (Assign tp pat gen cond) =
     indent +<>+ write0 pat +<>+ show tp +>+ write0 gen +<>+ writeWhereCond cond

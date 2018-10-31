@@ -96,6 +96,7 @@ instance Show Assign where
   show Unord  = " ~= "
   show Append = " << "
   show Replace = " := "
+  show ReplLoc = " =< "
 
 -- | Type of commands
 data Command

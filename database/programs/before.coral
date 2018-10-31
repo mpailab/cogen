@@ -1,7 +1,8 @@
 f arg thrm =
-  case arg of
-    theorem [thrm]
-    do
+      infixr 6 x ** y = x^y
+      prefix 7 //x # y// = x+y
+      infixl 2 p:cases; ...  = p in cases
+      r = a:b;c;d
       {-
         Comment 1
       -}
@@ -12,7 +13,7 @@ f arg thrm =
             x == y      -- comment 3
           f = \x y -> x++y
           Efgh = f` x y -- call f x y
-          d = (g` x) y
+          d = (g` x) y ** //z # v//
           c = (\x -> f` x + x)` [a,b,c]
           Abcd = (if a then h else f)` abcd` y
           Identification << {

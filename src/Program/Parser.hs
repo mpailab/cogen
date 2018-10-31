@@ -260,7 +260,7 @@ coralDef = emptyDef
   , identStart     = letter
   , identLetter    = alphaNum <|> oneOf "_'"
   , opStart        = opLetter coralDef
-  , opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
+  , opLetter       = oneOf ":;!#$%&*+./<=>?@\\^|-~()[]{}"
   , reservedOpNames= rsvOpNm ++ ["$"]++(fname . fst <$> concat getBuiltInOps)
   , reservedNames  = ["do", "done", "if", "case", "of", "where",
                       "true", "false", "no", "eq", "ne", "in",
@@ -412,6 +412,10 @@ opParser = do
   whiteSpaceParser
   return $ reverse s
 
+oper :: NameSpace m => Parser m String
+oper = many1 (opLetter coralDef) >>= \case
+  "=" -> parserZero
+  x -> whiteSpaceParser >> return x
 
 lmaybe :: MonadPlus m => Maybe a -> m a
 lmaybe (Just x) = return x
@@ -611,7 +615,7 @@ exprParserP :: NameSpace m => Int -> Parser m Expr
 exprParserP pr = parseExpr ([StItem (OpCompileH head) [OpLast pr] [] 0 pr []],NONE,False)
 
 closedExprParser :: NameSpace m => Parser m Expr
-closedExprParser = exprParserP (maxPriority-2)
+closedExprParser = exprElemParser -- exprParserP (maxPriority-2)
 
 exprParser :: NameSpace m => Parser m Expr
 exprParser = parseExpr ([],NONE,False)

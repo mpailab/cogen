@@ -1,27 +1,33 @@
 f arg thrm =
-  case arg of
-    theorem [thrm]
-    do
-      case thrm of
-        forall [boundVariables vars, premises prems, conclusion [concl]] where eq` vars thrm
-        do
-          h [plus [_, x]] | h [x] = concl where h in (eq` ([equality, equivalence] x) y)
-          f = \x y -> 
-              concat` x y
+  let _**_ = \x y -> 
+      pow` x y
 
-          Efgh = f` x y
-          d = (g` x) y
-          c = (\x -> 
-              add` (f` x) x
-          )` [a, b, c]
-          Abcd = (if a then h else f)` (abcd` ) y
-          Identification << (\list__ b__ -> 
-              describe = type
-              concat` b__ other ~= list__` 
-          )` list b
-          G = case g` t of {f [a, b] -> g [b, a]; [__, c] -> g [e, c]; _ g -> g; _ -> s}
-          x_header [equality [a&(plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
-        done
-      yield add` (subtract` (add` (f` a) b) c) (d` b)
+  let _//_#_// = \x y -> 
+      add` x y
+
+  let _:_;... = \p cases -> 
+      p in cases
+
+  r = _:_;...` a [b, c, d]
+  case thrm of
+    forall [boundVariables vars, premises prems, conclusion [concl]] where eq` vars thrm
+    do
+      h [plus [_, x]] | h [x] = concl where h in (eq` ([equality, equivalence] x) y)
+      f = \x y -> 
+          concat` x y
+
+      Efgh = f` x y
+      d = _**_` ((g` x) y) (_//_#_//` z v)
+      c = (\x -> 
+          add` (f` x) x
+      )` [a, b, c]
+      Abcd = (if a then h else f)` (abcd` ) y
+      Identification << (\list__ b__ -> 
+          describe = type
+          concat` b__ other ~= list__` 
+      )` list b
+      G = case g` t of {f [a, b] -> g [b, a]; [__, c] -> g [e, c]; _ g -> g; _ -> s}
+      x_header [equality [a&(plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
     done
+  yield add` (subtract` (add` (f` a) b) c) (d` b)
 done
