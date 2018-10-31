@@ -84,6 +84,8 @@ data Assign
   = Simple  -- ^ match a pattern with en expression (left = right | cond)
   | Select  -- ^ match patterns with list elements ([l1,...,lN] <- right)
   | Iterate -- ^ match a pattern with a result of iterating expression (left <= right)
+  | ReplLoc -- ^ same as Simple except all variables in left part are new (let left = right | cond)
+  | Replace -- ^ ??? same as Simple except all existing variables in left part are replaced with new values
   | Unord   -- ^ match list pattern with list of elements in any order (left ~= right)
   | Append  -- ^ appends right part to variable (left << right)
   deriving (Eq, Ord)
@@ -93,6 +95,7 @@ instance Show Assign where
   show Select = " <- "
   show Unord  = " ~= "
   show Append = " << "
+  show Replace = " := "
 
 -- | Type of commands
 data Command
@@ -130,5 +133,11 @@ data Command
       func :: Expr,  -- ^ function
       cond :: Expr   -- ^ condition of applying
     }
+
+  -- | Return statement or NONE, halts function computation
+  | Return { expr :: Expr }
+
+  -- | generate next value in generating function
+  | Yield  { expr :: Expr }
 
   deriving (Eq, Ord, Show)

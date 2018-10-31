@@ -20,6 +20,7 @@ module Program.BuiltIn
       getBuiltInFunc,
       getBuiltInOps,
       nameBuiltIn,
+      findBIFunc,
       BIFunc(..),
       BuiltInFunc(..)
     )
@@ -168,6 +169,25 @@ bfun nm f = BIFunc {
   isOp = False
 }
 
+combinefun :: Expr -> Expr -> Expr
+combinefun NONE f = f
+combinefun f NONE = f
+
+combinefun (Fun a1 [Switch e1 (Bool True) vars1]) (Fun a2 [Switch e2 (Bool True) vars2])
+  | length a1 /= length a2 = error "cannot combine function patterns with different number of arguments"
+  | List a1 /= e1 = error "cannot combine function which is not simple case of all its arguments"
+  | List a2 /= e2 = error "cannot combine function which is not simple case of all its arguments"
+  | otherwise = Fun a1 [Switch e1 (Bool True) $ vars1 ++ vars2] -- needs to rename variables a2->a1 in vars2
+
+combinefun (Fun a1 [Switch e1 (Bool True) vars1]) (Fun a2 cmds)
+  | length a1 /= length a2 = error "cannot combine function patterns with different number of arguments"
+  | List a1 /= e1 = error "cannot combine function which is not simple case of all its arguments"
+  | otherwise = Fun a1 [Switch e1 (Bool True) $ vars1 ++ [(List a2, Bool True, cmds)]]
+
+combinefun f@(Fun a1 cmds) _ = error "cannot combine fully defined function with another"
+combinefun _ _ = error "combinefun : cannot combine non-functional objects"
+
+
 builtIn :: Monad m => FuncInfo m
 builtIn = registerFunctions [
     --(".",   convf (\f g -> ))
@@ -192,7 +212,8 @@ builtIn = registerFunctions [
     op AssocLeft  0 "!="  "neq"      3  ((/=) :: Expr->Expr->Bool),
     --op AssocLeft  0 "in"  "member"   3  ()
     --op AssocRight 2 "$"   "apply"    0  (\x y -> Call x [y]),
-    bfun "header" (header :: Term Expr -> Expr)
+    bfun "header" (header :: Term Expr -> Expr),
+    bfun "combinefun" combinefun
   ]
 
 getBuiltInFunc :: Monad m => Int -> Maybe (BuiltInFunc m)
@@ -204,3 +225,6 @@ getBuiltInOps = groupBy (\(x,_) (y,_) -> prior x == prior y) $ filter (\(x,_) ->
                 where bi = (builtIn :: FuncInfo Identity)
 
 nameBuiltIn s = altname $ funcs (builtIn :: FuncInfo Identity) ! s
+
+findBIFunc :: String -> Maybe Expr
+findBIFunc nm = Sym . IL <$> M.lookup nm (names (builtIn :: FuncInfo Identity))

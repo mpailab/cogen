@@ -161,6 +161,12 @@ instance Write Command where
   writeI _ (Apply act cond) =
     indent +<>+ write0 act +<>+ writeWhereCond cond
 
+  writeI _ (Return e) =
+    indent +<>+ "return " +>+ write0 e +<+ "\n"
+
+  writeI _ (Yield e) =
+    indent +<>+ "yield " +>+ write0 e +<+ "\n"
+
 write0 :: (Write t, ProgWriter m) => t -> m String
 write0 = writeI False
 ------------------------------------------------------------------------------------------
