@@ -41,6 +41,7 @@ data Expr
   -- Simple expressions:
   = Var Var        -- ^ program variable
   | Ptr Var Expr   -- ^ pointer to expression
+  | APtr Var       -- ^ pointer to mutable variable in left part of assign expression
   | Ref Var Expr   -- ^ reference to expression
 
   -- Constant expressions:

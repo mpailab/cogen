@@ -1,8 +1,9 @@
 f arg thrm =
       infixr 6 x ** y = x^y
       prefix 7 //x # y// = x+y
-      infixl 2 p:cases; ...  = p in cases
-      r = a:b;c;d
+      postfix 200 x[[a]] = listElem` x a
+      postfix 150 x-[a, ... ] = x a
+      s <- f` d[[0]] y-[s,d,f]
       {-
         Comment 1
       -}

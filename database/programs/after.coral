@@ -5,10 +5,13 @@ f arg thrm =
   let _//_#_// = \x y -> 
       add` x y
 
-  let _:_;... = \p cases -> 
-      p in cases
+  let _[[_]] = \x a -> 
+      listElem` x a
 
-  r = _:_;...` a [b, c, d]
+  let _-[_,...] = \x a -> 
+      x a
+
+  s <- f` (_[[_]]` d 0) (_-[_,...]` y [s, d, f])
   case thrm of
     forall [boundVariables vars, premises prems, conclusion [concl]] where eq` vars thrm
     do

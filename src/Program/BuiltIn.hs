@@ -210,6 +210,7 @@ builtIn = registerFunctions [
     op AssocLeft  0 ">"   "gt"       4  ((>)  :: Expr->Expr->Bool),
     op AssocLeft  0 "=="  "eq"       3  ((==) :: Expr->Expr->Bool),
     op AssocLeft  0 "!="  "neq"      3  ((/=) :: Expr->Expr->Bool),
+    bfun "listElem" ((!!) :: [Expr] -> Int -> Expr),
     --op AssocLeft  0 "in"  "member"   3  ()
     --op AssocRight 2 "$"   "apply"    0  (\x y -> Call x [y]),
     bfun "header" (header :: Term Expr -> Expr),
