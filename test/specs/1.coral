@@ -1,10 +1,10 @@
 \ x ->
   case x of
-    context [forall]
+    context#[forall]
     do
-      context [forall, forall]
+      context#[forall, forall]
     done
     _
     do
-      context [forall]
+      context#[forall]
     done

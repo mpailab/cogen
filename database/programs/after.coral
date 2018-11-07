@@ -6,31 +6,35 @@ f arg thrm =
       add` x y
 
   let _[[_]] = \x a -> 
-      listElem` x a
+      listElem` (x` a)
 
   let _-[_,...] = \x a -> 
       x a
 
-  s <- f` (_[[_]]` d 0) (_-[_,...]` y [s, d, f])
+  x = y` 
+  s <- f` (_[[_]]` d 0 (_-[_,...]` y [s, d, f]))
   case thrm of
-    forall [boundVariables vars, premises prems, conclusion [concl]] where eq` vars thrm
+    _-[_,...]` forall [boundVariables` vars, premises` prems, _-[_,...]` conclusion [concl]] where eq` vars thrm
     do
-      h [plus [_, x]] | h [x] = concl where h in (eq` ([equality, equivalence] x) y)
+      h [plus [_, x]] | h [x] = concl
+        where
+          h in [equality, equivalence]
+          eq` x y
       f = \x y -> 
           concat` x y
 
-      Efgh = f` x y
+      Efgh = f` (x` y)
       d = _**_` ((g` x) y) (_//_#_//` z v)
       c = (\x -> 
-          add` (f` x) x
+          add` (f` x) (x` )
       )` [a, b, c]
-      Abcd = (if a then h else f)` (abcd` ) y
+      Abcd = (if a then h else f)` (abcd` y)
       Identification << (\list__ b__ -> 
           describe = type
           concat` b__ other ~= list__` 
       )` list b
-      G = case g` t of {f [a, b] -> g [b, a]; [__, c] -> g [e, c]; _ g -> g; _ -> s}
-      x_header [equality [a&(plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
+      G = case g` t of {f [a, b] -> (g [b, a])` ; [__, c] -> (g [e, c])` ; _ g -> g` ; _ -> s` }
+      _-[_,...]` x_header [_-[_,...]` equality [a&(_-[_,...]` plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
     done
   yield add` (subtract` (add` (f` a) b) c) (d` b)
 done

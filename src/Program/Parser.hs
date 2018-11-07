@@ -101,7 +101,8 @@ data OpInfo = OpInfo {
 data PStateM = PStateM {
   infxopsM   :: Map.Map String OpInfo,
   prfxopsM   :: Map.Map String OpInfo,
-  oppartsM   :: Trie Char Int -- 1 if keyword, 0 if sequence of symbols, 2 if reserved
+  ifxtrieM   :: Trie Char Int, -- 1 if keyword, 0 if sequence of symbols, 2 if reserved
+  pfxtrieM   :: Trie Char Int -- 1 if keyword, 0 if sequence of symbols, 2 if reserved
 }
 
 data PState = PSt {
@@ -113,7 +114,8 @@ data PState = PSt {
   }
 infxops = infxopsM . statem
 prfxops = prfxopsM . statem
-opparts = oppartsM . statem
+pfxtrie = pfxtrieM . statem
+ifxtrie = ifxtrieM . statem
 
 type IndentSt = Either (Int,Int) Int
 
@@ -249,6 +251,7 @@ showPos pos = file ++ " (line " ++ show i ++ ", column " ++ show j ++ ")"
 
 rsvOpNm = ["=", "<-", "@", "&&", "||", "|", "+",
            "++", "->", "*", "/", "&",  "<<", "~=", ".."]
+rsvKw = ["case", "of", "where","then","else","done","do"]
 
 -- | This is a minimal token definition for Coral language.
 coralDef :: NameSpace m => GenLanguageDef Text.Text PState m
@@ -262,9 +265,9 @@ coralDef = emptyDef
   , opStart        = opLetter coralDef
   , opLetter       = oneOf ":;!#$%&*+,./<=>?@\\^|-~()[]{}"
   , reservedOpNames= rsvOpNm ++ ["$"]++(fname . fst <$> concat getBuiltInOps)
-  , reservedNames  = ["do", "done", "if", "case", "of", "where",
-                      "true", "false", "no", "eq", "ne", "in",
-                      "then", "else",
+  , reservedNames  = rsvKw ++ ["if", "true", "false", "no",
+                      "eq", "ne", "in",
+                      "yield", "return",
                       "args", "replace", "_", "__"]
   , caseSensitive  = True
   }
@@ -339,8 +342,8 @@ semiSepParser = semiSep coralLexer
 whiteSpaceParser :: NameSpace m => Parser m ()
 whiteSpaceParser = whiteSpace coralLexer
 
-funcApp :: NameSpace m => Parser m ()
-funcApp = try $ char '`' >> notFollowedBy (letter <|> oneOf "[({") >> whiteSpaceParser
+-- funcApp :: NameSpace m => Parser m ()
+-- funcApp = try $ char '`' >> notFollowedBy (letter <|> oneOf "[({") >> whiteSpaceParser
 --  <|> do p0 <- getPos
 --         whiteSpaceParser
 --         p1 <- getPos
@@ -351,15 +354,15 @@ ident = liftM2 (:) (identStart coralDef) (many (identLetter coralDef))
 prefixFunc :: NameSpace m => Parser m Expr -> Parser m Expr
 prefixFunc p =  whiteSpaceParser >> char '`' >> ((ident >>= symbolOrVar) <|> p)
 
-infxFunc :: NameSpace m => Parser m Expr -> Parser m Expr -> Expr -> Parser m Expr
-infxFunc parg pf first = do
-  dbg "try infix function"
-  f <- prefixFunc pf
-  dbg "infix found"
-  args <- option [] (funcApp >> many parg)
-  whiteSpaceParser
-  dbg $ "args = "++show args
-  return $ Call f $ first:args
+-- infxFunc :: NameSpace m => Parser m Expr -> Parser m Expr -> Expr -> Parser m Expr
+-- infxFunc parg pf first = do
+--   dbg "try infix function"
+--   f <- prefixFunc pf
+--   dbg "infix found"
+--   args <- option [] (funcApp >> many parg)
+--   whiteSpaceParser
+--   dbg $ "args = "++show args
+--   return $ Call f $ first:args
 
 symbolOrVar :: NameSpace m => String -> Parser m Expr
 symbolOrVar name = getLSymbol name >>= \case
@@ -408,6 +411,7 @@ vparserstep s t@(Trie b sub) = try (do {
 vparserstep1 :: NameSpace m => String -> (Trie Char Int,[String]) -> Parser m (String,Int)
 vparserstep1 s (Trie b sub, l) = try (do {
       ; c <- sp <$> anyChar
+      --; dbg $ "read char : `"++show c++"`"
       ; when (c==' ') whiteSpaceParser
       ; lmaybe (suf c (sub,l)) >>= vparserstep1 (c:s)
     }) <|> (s,) <$> lmaybe b
@@ -420,26 +424,17 @@ vparser t =  vparserstep "" t
 vparser1 :: NameSpace m => (Trie Char Int,[String]) -> Parser m (String,Int)
 vparser1 t =  vparserstep1 "" t
 
-opParser :: NameSpace m => Parser m String
-opParser = do
+opParser1 :: NameSpace m => Bool -> [String] -> Parser m (String, Maybe OpInfo)
+opParser1 ifx nxt = try $ do
   st <- getState
-  --dbg (concat $ map (\x->"    "++show x++"\n") $ getkv $ opparts st)
-  (s,b) <- vparser $ opparts st
+  --dbg $ "in opParser : ifx="++show ifx++", nxt = "++show nxt
+  --dbg (concat $ map (\x->"    "++show x++"\n") $ getkv $ (if ifx then ifxtrie st else pfxtrie st))
+  (s,b) <- vparser1 (if ifx then ifxtrie st else pfxtrie st,nxt)
   --guard (b>=0)
   when (b==1) $ notFollowedBy (identLetter coralDef)
   whiteSpaceParser
-  return $ reverse s
-
-opParser1 :: NameSpace m => [String] -> Parser m String
-opParser1 nxt = do
-  st <- getState
-  --dbg (concat $ map (\x->"    "++show x++"\n") $ getkv $ opparts st)
-  (s,b) <- vparser1 (opparts st,nxt)
-  --guard (b>=0)
-  when (b==1) $ notFollowedBy (identLetter coralDef)
-  whiteSpaceParser
-  return $ reverse s
-
+  let rs = reverse s
+  return (rs, if elem rs nxt then Nothing else Map.lookup rs (if ifx then infxops st else prfxops st))
 
 oper :: NameSpace m => Parser m String
 oper = try $ many1 (opLetter coralDef) >>= \case
@@ -450,11 +445,11 @@ lmaybe :: MonadPlus m => Maybe a -> m a
 lmaybe (Just x) = return x
 lmaybe Nothing = mzero
 
-pfxinfo ::  NameSpace m => String -> Parser m OpInfo
-pfxinfo op = (Map.lookup op) . prfxops <$> getState >>= lmaybe
+-- pfxinfo ::  NameSpace m => String -> Parser m OpInfo
+-- pfxinfo op = (Map.lookup op) . prfxops <$> getState >>= lmaybe
 
-prefixop :: NameSpace m => Parser m OpInfo
-prefixop = try (opParser >>= pfxinfo)
+-- prefixop :: NameSpace m => Parser m OpInfo
+-- prefixop = try (opParser >>= pfxinfo)
 
 data StItem = StItem {
   ophdr :: OpHeader,     -- ^ header of current operation
@@ -545,14 +540,14 @@ indd :: NameSpace m => EStack -> Parser m ()
 indd [] = indented
 indd (a:_) = if nint a == 0 then indented else return ()
 
-isprefix :: NameSpace m => String -> Parser m Bool
-isprefix op = Map.member op . prfxops <$> getState
-isinfix op  = Map.member op . infxops <$> getState
-isclosing op [] = False
-isclosing op (h:_) = elem op $ closing h
+-- isprefix :: NameSpace m => String -> Parser m Bool
+-- isprefix op = Map.member op . prfxops <$> getState
+-- isinfix op  = Map.member op . infxops <$> getState
+-- isclosing op [] = False
+-- isclosing op (h:_) = elem op $ closing h
 
-optype op st | isclosing op st = return (Nothing, Nothing)
-             | otherwise = getState >>= \st -> return (Map.lookup op $ infxops st, Map.lookup op $ prfxops st)
+-- optype op st | isclosing op st = return (Nothing, Nothing)
+--              | otherwise = getState >>= \st -> return (Map.lookup op $ infxops st, Map.lookup op $ prfxops st)
 
 
 iscall (Call _ _) = True
@@ -603,36 +598,33 @@ iparts (h:_) = closing h
 
 exprstep :: NameSpace m => (EStack, Expr, Bool) -> Parser m (EStack, Expr, Bool)
 exprstep (st,NONE,_) = dbg "read expression" >> (
-      (\(OpInfo _ as h) -> (pushst h as [] st,NONE,False)) <$> try prefixop
+      (opParser1 False (lst st) >>= (\op -> (dbg ("read `"++show op++"`") >> (return $ applyop op)))
+      >>= \(st,e,r) -> dbg ("result : Expr = "++show e++", stack :"++prstack st)>>return (st,e,r))
   <|> (indd st >> exprElemParser >>= return . (st,,False))
   <|> if null st then parserZero else return (st,NONE,True))
+  where lst (StItem _ [OpInfxSeq _ e] (List []:_) _ _ _:_) = [e]
+        lst _                                              = []
+
+        applyop (op,Nothing)                          = (reducestop NONE op st)
+        applyop (_,Just (OpInfo _ [] (OpCompileH f))) = (st,f [],False)
+        applyop (_,Just (OpInfo _ as h))              = (pushst h as [] st,NONE,False)
 
 exprstep (st,e,_) = try (do { dbg "in exprstep"
-  ; indd st -- if it is not inside parentheses or some operator, then it must be indented
-  ; op <- opParser1 (iparts st) <|> return "" -- read operator or assume it is empty operator
+  ; indd st -- if it is not inside enclosing operator, then it must be indented
+  ; (op,info) <- opParser1 True (iparts st) -- read operator or assume it is empty operator
   ; dbg ("read operator "++op++": e = "++show e++", stack = "++(if null st then "[]" else prstack st))
-  ; (ifx, pfx) <- optype op st -- Map.lookup op . infxops <$> getState
-  ; case (pfx, ifx, op=="") of
-    (Just (OpInfo _ oa oh), Nothing, _) ->
-      return (pushst oh oa [] $ hfun st hc, NONE, False)
-    (_, _, True) -> case reducestpr e applyPriority st of
-      (h1@(StItem _ [OpLastSeq "" _] (List es:args) _ _ _):sts1,e1) -> dbg ("add arg = "++show e1)>>
-        return (h1 { rargs=List (e1:es):args } : sts1,NONE,False)
-      (st1, e1@(Call h1 [])) -> dbg ("reducerpr -> "++show st1++", "++show e1)>>((exprElemParser >>= return . (addfun [] st1 h1,, False)) <|> return (st1,e1,True))
-      (st1, e1) -> dbg ("reducerpr -> "++show st1)>> ((exprElemParser >>= return . (addtm st1 e1,,False)) <|> (dbg "stop" >> return (st1,e1,True)))
-    (_, Just (OpInfo lpr [] h),_) ->
+  --; (ifx, pfx) <- optype op st -- Map.lookup op . infxops <$> getState
+  ; case info of
+    Just (OpInfo lpr [] h) -> -- simple postfix operator
       dbg ("stack reduced by '"++op++"' -> "++show (cst,e1))>>return (cst, conv1 e1 h [],False)
       where (cst,e1) = reducestpr e lpr st
-    (_, Just (OpInfo lpr args h),_) ->
+    Just (OpInfo lpr args h) -> -- begin of infix or complex postfix operator
       dbg ("stack reduced by '"++op++"' -> "++show (cst,e1))>>return (pushst h args [e1] cst, NONE,False)
       where (cst,e1) = reducestpr e lpr st
-    (Nothing, Nothing, False) -> case reducestop e op st of
+    Nothing -> case reducestop e op st of -- closing element of current complex operator
       (_,_,True) -> parserZero -- parser fails and termination signal is returned after <|>
       x          -> dbg ("stack reduced by '"++op++"': "++show x) >> return x
   }) <|> return (st,e,True)
-  where (hc, hfun, rpr) = case e of
-          (Call hh as) -> (hh, addfun as, applyPriority)
-          otherwise   -> (e, addtm, termPriority)
 
 parseExpr :: NameSpace m => (EStack,Expr,Bool) -> Parser m Expr
 parseExpr (st,e,False) = exprstep (st,e,False) >>= parseExpr
@@ -844,6 +836,7 @@ programParser = do
   return $ Program h stmts
 
 
+mktuple [List [NONE]] = Tuple []
 mktuple [List [x]] = x
 mktuple [List l] = Tuple l
 
@@ -894,18 +887,24 @@ makeTerm [h,(List args)] = Term $ h :> map mt args
                             mt x = T x
 makeTerm [h, la] = Term $ h :>> la
 
+funcApp :: [Expr] -> Expr
+funcApp [Call f args,List xs] = Call f (args++xs)
+funcApp [f, List [NONE]] = Call f []
+funcApp [f, List [Tuple []]] = Call f []
+funcApp [f, List xs] = Call f xs
+
 ifxBuiltinS :: [(String,OpInfo)]
 ifxBuiltinS = [
   ("&", OpInfo maxPriority [OpLast $ maxPriority-1] $ OpCompileH createPtr),
   ("@", OpInfo maxPriority [OpLast $ maxPriority-1] $ OpCompileH createRef),
-  (":>", OpInfo maxPriority [OpLast $ maxPriority-1] $ OpCompileH makeTerm),
+  ("#", OpInfo maxPriority [OpLast $ maxPriority-1] $ OpCompileH makeTerm),
   ("&&", OpInfo 3 [OpLast 4] $ OpCompileH (\[a,b]-> pAnd a b)),
   ("||", OpInfo 2 [OpLast 3] $ OpCompileH (\[a,b]-> pOr a b)),
   ("|", OpInfo 2 [OpLast 3] $ OpCompileH (\[a,b]-> pAlt a b)),
   ("in", OpInfo 5 [OpLast 6] $ OpCompileH (\[a,b] -> In a b)),
   ("?", OpInfo 1 [OpInfx ":", OpLast 0] $ OpCompileH (\[a,b,c] -> IfElse a b c)),
-  ("` ",OpInfo applyPriority [] $ OpCompileH (\[e] -> Call e [])),
-  ("`",OpInfo 17 [OpInfx "` ", OpLastSeq "" 18] $ OpCompileH (\[a,f,List b] -> Call f (a:b)))
+  ("", OpInfo applyPriority [OpLastSeq "" applyPriority] $ OpCompileH funcApp),
+  ("`",OpInfo 17 [OpInfx "`", OpLastSeq "" 18] $ OpCompileH (\[a,f,List b] -> Call f (a:b)))
   --("-", OpInfo 0 [OpLast 20] (OpCompileH (\[x] -> Call  )))
   --("` ", OpInfo 0 [OpInfx "then", OpInfx "else", OpLast 0] (OpCompileH ([a,b,c] -> IfElse a b c))),
   ] ++ mapMaybe toifxdef (concat getBuiltInOps)
@@ -925,19 +924,19 @@ getopparts (OpLast _:ops) = getopparts ops
 
 addIfxop :: (String,OpInfo) -> PStateM -> PStateM
 addIfxop (s,o) st = st {
-  infxopsM = Map.insert s o (infxopsM st),
-  --oppartsM = foldr addTrie (oppartsM st) (s:getopparts (opargs o))
-  oppartsM = addTrie s (oppartsM st)
+    infxopsM = Map.insert s o (infxopsM st),
+    --oppartsM = foldr addTrie (oppartsM st) (s:getopparts (opargs o))
+    ifxtrieM = addTrie s (ifxtrieM st)
   }
 
 addPfxop :: (String,OpInfo) -> PStateM -> PStateM
 addPfxop (s,o) st = st {
-  prfxopsM = Map.insert s o (prfxopsM st),
-  --oppartsM = foldr addTrie (oppartsM st) (s:getopparts (opargs o))
-  oppartsM = addTrie s (oppartsM st)
+    prfxopsM = Map.insert s o (prfxopsM st),
+    --oppartsM = foldr addTrie (oppartsM st) (s:getopparts (opargs o))
+    pfxtrieM = addTrie s (pfxtrieM st)
   }
 
-zeroStateM = PStateM Map.empty Map.empty $ foldr addTrie empty $ rsvOpNm
+zeroStateM = PStateM Map.empty Map.empty (foldr addTrie empty $ rsvOpNm++rsvKw) (foldr addTrie empty $ rsvOpNm)
 
 initStateM :: PStateM
 initStateM = foldr addPfxop (foldr addIfxop zeroStateM ifxBuiltinS) pfxBuiltinS
