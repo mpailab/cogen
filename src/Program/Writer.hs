@@ -31,7 +31,7 @@ import           LSymbol
 import           Program
 import           Term
 import           Utils
-
+import           Program.BuiltIn
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
@@ -87,7 +87,8 @@ instance Write Expr where
   writeI _ (Bool x) = return $ show x
   writeI par (Term t) = writeI par t
   writeI _ (Var n) = writeVar n
-  writeI _ (Sym s) = nameLSymbol s
+  writeI _ (Sym (SL s)) = nameLSymbol (SL s)
+  writeI _ (Sym (IL s)) = return $ nameBuiltIn s
   writeI _ Any = return "_"
   writeI _ AnySeq = return "__"
   writeI par (Call h args) = inpars par $
@@ -140,6 +141,8 @@ instance Write Command where
 
   writeI _ (Assign Append pat (List frags) cond) =
       indent +<>+ write0 pat +<>+ writeSequenceS "" frags (\f -> show Append +>+ write0 f) +<>+ writeWhereCond cond
+  writeI _ (Assign ReplLoc pat e cond) = 
+    indent +<>+ "let " +>+ write0 pat +<>+ " = " +>+ write0 e +<>+ writeWhereCond cond
 
   writeI _ (Assign tp pat gen cond) =
     indent +<>+ write0 pat +<>+ show tp +>+ write0 gen +<>+ writeWhereCond cond
@@ -159,6 +162,12 @@ instance Write Command where
   -- | Write an acting instruction of program fragment corresponding to a given indent
   writeI _ (Apply act cond) =
     indent +<>+ write0 act +<>+ writeWhereCond cond
+
+  writeI _ (Return e) =
+    indent +<>+ "return " +>+ write0 e +<+ "\n"
+
+  writeI _ (Yield e) =
+    indent +<>+ "yield " +>+ write0 e +<+ "\n"
 
 write0 :: (Write t, ProgWriter m) => t -> m String
 write0 = writeI False
@@ -189,6 +198,7 @@ writePrefx x y wr = (x ++ " ") +>+ (unwords <$> mapM wr y)
 writeInfx :: NameSpace m => String -> [a] -> (a -> m String) -> m String
 writeInfx x y wr = intercalate (" " ++ x ++ " ") <$> mapM wr y
 
+inpars :: Monad m => Bool -> m String -> m String
 inpars par str = if par then "(" +>+ str +<+ ")"  else str
 
 

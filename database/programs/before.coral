@@ -1,25 +1,31 @@
 f arg thrm =
-  case arg of
-    theorem [thrm]
-    do
+      infixr 6 x ** y = x^y
+      prefix 7 //x # y// = x+y
+      postfix 200 x[[a]] = listElem x a
+      postfix 150 x-[a, ... ] = x # a
+      x = y ()
+      s <- f d[[0]] y-[s,d,f]
       {-
         Comment 1
       -}
       case thrm of
-        forall [boundVariables vars, premises prems, conclusion [concl]] where vars eq thrm
+        forall-[boundVariables vars, premises prems, conclusion-[concl]] where vars == thrm
         do
-          h [plus[_,x]] | h [x] = concl where h in [equality, equivalence] -- comment 2
-            x eq y      -- comment 3
+          h#[plus#[_,x]] | h#[x] = concl where
+            h in [equality, equivalence] -- comment 2
+            x == y      -- comment 3
           f = \x y -> x++y
-          Efgh = x `f` y -- call f x y
-          c = (\x -> f` x x)` [a,b,c]
-          Abcd = (if a then h else f)` abcd `y
-          Identification << {<
+          Efgh = f x y -- call f x y
+          d = (g x) # y ** //z # v//
+          c = (\x -> f x + x) [a,b,c]
+          Abcd = (if a then h else f) (abcd ()) y
+          Identification << {
             describe = type
-            $b ++ other ~= $list`
-          >}
-          G = case t `g of {f [a,b] -> g [b,a]; [__,c] -> g [e,c]; _ g -> g; _ -> s}
-          x_header [equality [a&(plus [p&x1, x2]), b@(plus` [x3, x1])]] <- x
+            $b ++ other ~= $list ()
+          }
+          G = case g t of {f#[a,b] -> g#[b,a]; [__,c] -> g#[e,c]; _#g -> g; _ -> s}
+          x_header-[equality-[a&(plus-[p&x1, x2]), b@(plus [x3, x1])]] <- x
         done
+      yield f a+b-c+d b
     done
 done

@@ -25,6 +25,7 @@ library
                        Program.Parser
                        Program.Writer
                        Program.BuiltIn
+                       Structs.Trie
                        Rule
                        Term
                        Utils
