@@ -33,28 +33,29 @@ import           LSymbol
 import           Program
 import           Program.BuiltIn
 import           Term
+import           DebugInfo
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-class Handle a where
-  handle :: Expr -> a
+class DebugInfo d => Handle d a where
+  handle :: Expr d -> a
 
-instance Monad m => Handle (m Expr) where
+instance (DebugInfo d, Monad m) => Handle d (m (Expr d)) where
   handle e = evalHandler (eval e) (Info M.empty M.empty)
 
-instance Handle a => Handle (Expr -> a) where
+instance Handle d a => Handle d (Expr d -> a) where
   handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x e (Bool True)
                                in handle (Fun xs (cmd:cmds))
 
-type Values = M.Map Var Expr
-type Swap m  = Expr -> Handler m ()
-type Swaps m = M.Map Var (Swap m)
+type Values d = M.Map Var (Expr d)
+type Swap m d = Expr d -> Handler d m ()
+type Swaps m d = M.Map Var (Swap m d)
 
-data Info m = Info
+data Info m d = Info
   {
-    vals  :: Values,
-    swaps :: Swaps m
+    vals  :: Values d,
+    swaps :: Swaps m d
   }
 
 data Eval a
@@ -65,19 +66,19 @@ instance Functor Eval where
   fmap f (Value a)   = Value (f a)
   fmap f (Error err) = Error err
 
-newtype Handler m a = Handler { runHandler :: Info m -> m (Eval a, Info m) }
+newtype Handler d m a = Handler { runHandler :: DebugInfo d => Info m d -> m (Eval a, Info m d) }
 
-evalHandler :: Monad m => Handler m a -> Info m -> m a
+evalHandler :: (DebugInfo d, Monad m) => Handler d m a -> Info m d -> m a
 evalHandler m s = runHandler m s >>= \ ~(a, _) -> case a of
   Value x   -> return x
   Error err -> error $ "Handler error: " ++ err ++ ".\n"
 {-# INLINE evalHandler #-}
 
-instance Functor m => Functor (Handler m) where
+instance Functor m => Functor (Handler d m) where
   fmap f (Handler m) = Handler $ \ s -> fmap (\ ~(a, s') -> (f <$> a, s')) (m s)
   {-# INLINE fmap #-}
 
-instance Monad m => Applicative (Handler m) where
+instance Monad m => Applicative (Handler d m) where
   pure a = Handler $  \s -> return (Value a, s)
   {-# INLINE pure #-}
 
@@ -88,7 +89,7 @@ instance Monad m => Applicative (Handler m) where
     (Error err, s') -> return (Error err, s')
   {-# INLINE (<*>) #-}
 
-instance Monad m => Alternative (Handler m) where
+instance Monad m => Alternative (Handler d m) where
   empty = Handler $ \ s -> return (Error "an empty alternative", s)
   {-# INLINE empty #-}
 
@@ -97,7 +98,7 @@ instance Monad m => Alternative (Handler m) where
     _              -> n s
   {-# INLINE (<|>) #-}
 
-instance Monad m => Monad (Handler m) where
+instance Monad m => Monad (Handler d m) where
   m >>= k  = Handler $ runHandler m >=> \ case
     (Value a, s') -> runHandler (k a) s'
     (Error err, s') -> return (Error err, s')
@@ -109,7 +110,7 @@ instance Monad m => Monad (Handler m) where
   fail str = Handler $ \ s -> return (Error str, s)
   {-# INLINE fail #-}
 
-instance Monad m => MonadPlus (Handler m) where
+instance Monad m => MonadPlus (Handler d m) where
   mzero = Handler $ \ s -> return (Error "an empty alternative", s)
   {-# INLINE mzero #-}
 
@@ -118,15 +119,15 @@ instance Monad m => MonadPlus (Handler m) where
     _              -> n s
   {-# INLINE mplus #-}
 
-instance MonadTrans Handler where
+instance MonadTrans (Handler d) where
   lift m = Handler $ \ s -> m >>= \a -> return (Value a, s)
   {-# INLINE lift #-}
 
-instance MonadIO m => MonadIO (Handler m) where
+instance MonadIO m => MonadIO (Handler d m) where
   liftIO = lift . liftIO
   {-# INLINE liftIO #-}
 
-instance Monad m => MonadState (Info m) (Handler m) where
+instance Monad m => MonadState (Info m d) (Handler d m) where
   state f = Handler $ \ s -> let ~(a,s') = f s in return (Value a, s')
   get = state $ \ s -> (s, s)
   put s = state $ const ((), s)
@@ -134,26 +135,26 @@ instance Monad m => MonadState (Info m) (Handler m) where
 ------------------------------------------------------------------------------------------
 -- Functions
 
-getVal :: Monad m => Var -> Handler m (Maybe Expr)
+getVal :: Monad m => Var -> Handler d m (Maybe (Expr d))
 getVal x = get >>= \info -> return (M.lookup x (vals info))
 
-setVal :: Monad m => Int -> Expr -> Handler m Expr
+setVal :: Monad m => Int -> Expr d -> Handler d m (Expr d)
 setVal x v = modify (\info -> info {vals = M.insert x v (vals info)}) >> return v
 
-getPtr :: Monad m => Var -> Handler m (Maybe (Expr, Swap m))
+getPtr :: Monad m => Var -> Handler d m (Maybe (Expr d, Swap m d))
 getPtr x = get >>= \info -> case (M.lookup x (vals info), M.lookup x (swaps info)) of
   (Just e, Just sw) -> return (Just (e,sw))
   _                 -> return Nothing
 
-setPtr :: Monad m => Int -> Expr -> Swap m -> Handler m Expr
+setPtr :: Monad m => Int -> Expr d -> Swap m d -> Handler d m (Expr d)
 setPtr x v sw = modify (\info -> info { vals = M.insert x v (vals info),
                                         swaps = M.insert x sw (swaps info) }) >> return v
 
-putError :: Monad m => forall a . String -> Handler m a
+putError :: Monad m => forall a . String -> Handler d m a
 putError str = Handler $ \ s -> return (Error str, s)
 
 
-eval :: Monad m => Expr -> Handler m Expr
+eval :: (DebugInfo d, Monad m) => Expr d -> Handler d m (Expr d)
 
 eval (Var i) = getVal i >>= \case
   Just x  -> return x
@@ -173,9 +174,9 @@ eval AnySeq = putError "can't evaluate any sequence of expressions"
 
 eval x@(Bool _) = return x
 
-eval (Equal x y) = Bool <$> liftM2 (==) (eval x) (eval y)
+eval (Equal x y) = Bool' mempty <$> liftM2 (==) (eval x) (eval y)
 
-eval (NEqual x y) = Bool <$> liftM2 (/=) (eval x) (eval y)
+eval (NEqual x y) = Bool' mempty <$> liftM2 (/=) (eval x) (eval y)
 
 eval (In x y) = eval x >>= \ex -> eval y >>= \case
   (Alt   ey) -> return (Bool (ex `elem` ey))
@@ -217,17 +218,17 @@ eval (Fun _ _) = putError "can't evaluate a function definition"
 
 eval NONE = putError "can't evaluate an undefined expression"
 
-evalB :: Monad m => Expr -> Handler m Bool
+evalB :: (DebugInfo d, Monad m) => Expr d -> Handler d m Bool
 evalB e = eval e >>= \case
   Bool c -> return c
   _      -> putError "a wrong Boolean expression"
 
-evalL :: Monad m => Expr -> Handler m [Expr]
+evalL :: (DebugInfo d, Monad m) => Expr d -> Handler d m [Expr d]
 evalL e = eval e >>= \case
   List l -> return l
   _      -> putError "a wrong list expression"
 
-evalCall :: Monad m => Expr -> [Expr] -> Handler m Expr
+evalCall :: (DebugInfo d, Monad m) => Expr d -> [Expr d] -> Handler d m (Expr d)
 evalCall ff@(Sym (IL s)) as = case getBuiltInFunc s of
   Just (BuiltInFunc n f) | n > length as -> return $ Call ff as
                          | n == length as -> mapM eval as >>= f
@@ -242,10 +243,10 @@ evalCall (Fun (x:xs) cmds) (a:as) = let c = Assign Simple x a NONE
                                   in evalCall (Fun xs (c:cmds)) as
 evalCall e as = putError "call an undefined function"
 
-ident :: Monad m => Expr -> Expr -> Handler m Expr
+ident :: (DebugInfo d, Monad m) => Expr d -> Expr d -> Handler d m (Expr d)
 ident x y = identI x (\_ -> return ()) y (\_ -> return ())
 
-identI :: Monad m => Expr -> Swap m -> Expr -> Swap m -> Handler m Expr
+identI :: (DebugInfo d, Monad m) => Expr d -> Swap m d -> Expr d -> Swap m d -> Handler d m (Expr d)
 
 identI (Alt []) lsw y rsw = empty
 identI (Alt (x:xs)) lsw y rsw =
@@ -311,8 +312,8 @@ identI (Set xs) lsw (Set ys) rsw =
 
 identI _ _ _ _ = putError "an unsupported identification"
 
-identLists :: Monad m => [Expr] -> ([Expr] -> Handler m ()) ->
-                         [Expr] -> ([Expr] -> Handler m ()) -> Handler m [Expr]
+identLists :: (DebugInfo d, Monad m) => [Expr d] -> ([Expr d] -> Handler d m ()) ->
+                         [Expr d] -> ([Expr d] -> Handler d m ()) -> Handler d m [Expr d]
 identLists [] _ [] _ = return []
 identLists [] _ _ _ = putError "can't identify lists with different lengths"
 identLists _ _ [] _ = putError "can't identify lists with different lengths"
@@ -320,13 +321,13 @@ identLists (x:xs) lsw (y:ys) rsw =
   identI x (lsw . (:xs)) y (rsw . (:ys)) >>= \e ->
   identLists xs (lsw . (x:)) ys (rsw . (y:)) >>= \es -> return (e:es)
 
-check :: Monad m => Expr -> Handler m ()
+check :: (DebugInfo d, Monad m) => Expr d -> Handler d m ()
 check e = evalB e >>= \case
   True  -> return ()
   False -> putError "a condition is false"
 
 -- | Run a list of commands
-run :: Monad m => [Command] -> Handler m Expr -> Handler m Expr
+run :: (DebugInfo d, Monad m) => [Command d] -> Handler d m (Expr d) -> Handler d m (Expr d)
 
 run (Assign Simple l r c : cmds) _ =
   ident l r >>= \ e -> check c >> run cmds (return e)
@@ -353,9 +354,9 @@ We handle a command 'p <- g | c' as follows. First, we eval p as a list of expre
 -}
 run (Assign Select (List ls) r c : cmds) _ =
   evalL r >>= f ls >>= \ es ->
-  check c >> run cmds (return $ List es)
+  check c >> run cmds (return $ List' mempty es)
   where
-    f :: Monad m => [Expr] -> [Expr] -> Handler m [Expr]
+    f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Handler d m [Expr d]
     f [] _ = empty
     f (x:xs) (y:ys) = do
       guard (length xs <= length ys)
@@ -383,7 +384,7 @@ run (Assign Unord (List ls) r c : cmds) _ =
   guard (length ls <= n + 1) >> f ls rs n >>= \ es ->
   check c >> run cmds (return $ List es)
   where
-    f :: Monad m => [Expr] -> [Expr] -> Int -> Handler m [Expr]
+    f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Int -> Handler d m [Expr d]
     f [] _ n = empty
     f [Ref i AnySeq] ys n = setVal i (List ys) >>= \e -> return  [e]
     f (z@(Ref i AnySeq):xs) ys n = f (xs ++ [z]) ys n

@@ -17,13 +17,13 @@ f arg thrm =
                 list = case h of
                   zamenausloviya -> conditions
                   zamenatermov -> premises
-                Identification << {<
+                Identification << {
                   describe = type
                   $b ++other ~= $list()
-                >}
-                Actions << {<
+                }
+                Actions << {
                   $list := $c:other
-                >}
+                }
                 done
               (sviazka, equivalence [exists [boundVariables y, and b | b], c])
               do
@@ -63,7 +63,7 @@ f arg thrm =
                   условия := $result ++ other
                 }
               done
-              (параметризация, h [b, exists [boundVariables y, conjunction* f]]) -- 10.2.3 пункт 2
+              (параметризация, h [b, exists [boundVariables y, conjunction ?# f]]) -- 10.2.3 пункт 2
                 where h in [equivalence, implies]
               do
                 result = [t3!i | подборзначений [i] <- Specifiers]

@@ -1,5 +1,7 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE DeriveFunctor         #-}
 
 {-|
 Module      : Program
@@ -29,11 +31,13 @@ module Program
       getPVar,
       getPVars,
       getPVarIfExist,
+      newLocalVar,
       initPrograms,
       initPVars,
       namePVar,
       newPrograms,
       newPVars,
+      removeDbgInfo,
       NameSpace,
       Header(..),
       Program(..),
@@ -41,6 +45,8 @@ module Program
       Program.Base,
       Program.Vars,
       Programs,
+      ProgramS,
+      ProgramsS,
       --PAssign(..),
       PVars,
       setPrograms,
@@ -62,6 +68,7 @@ import           Expr
 import           LSymbol
 import           Term
 import           Utils
+import           DebugInfo
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -74,16 +81,22 @@ data Header = Header
   deriving (Eq, Ord,Show)
 
 -- | Type of program : header + command list
-data Program
-  = Program Header [Command]
+data Program d
+  = Program Header [Command d]
   | Empty
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord,Show,Functor)
 
 -- | Type of programs database
-type Programs = M.Map LSymbol Program
+type Programs d = M.Map LSymbol (Program d)
+
+type ProgramS = Program SrcInfo
+type ProgramsS = Programs SrcInfo
+
+removeDbgInfo :: Program d -> Program ()
+removeDbgInfo = fmap (\_ -> ())
 
 -- | Init a database of programs
-initPrograms :: Programs
+initPrograms :: ProgramsS
 initPrograms = M.empty
 
 -- | Base class of programs
@@ -91,34 +104,34 @@ class Monad m => Base m where
   {-# MINIMAL getPrograms, setPrograms #-}
 
   -- | Get a database of programs
-  getPrograms :: m Programs
+  getPrograms :: m ProgramsS
 
   -- | Set a database of programs
-  setPrograms :: Programs -> m ()
+  setPrograms :: ProgramsS -> m ()
 
   -- | Init a new database of programs
-  newPrograms :: m Programs
-  newPrograms = let db = initPrograms in setPrograms db >> return db
+  newPrograms :: m ProgramsS
+  newPrograms = let (db :: ProgramsS) = initPrograms in setPrograms db >> return db
 
   -- | Get the program of logical symbol
-  getProgram :: LSymbol -> m (Maybe Program)
+  getProgram :: LSymbol -> m (Maybe ProgramS)
   getProgram s = M.lookup s <$> getPrograms
 
   -- | Add a program of logical symbol to a database
-  addProgram :: LSymbol -> Program -> m ()
+  addProgram :: LSymbol -> ProgramS -> m ()
   addProgram s p = getPrograms >>= setPrograms . M.insert s p
 
 -- | Type for database of program variables
 data PVars = PVars
   {
-    names   :: Array Int String, -- ^ names of variable
-    numbers :: M.Map String Int, -- ^ numbers of variables
-    curNum  :: Int               -- ^ number of first free variable
+    names    :: Array Int String,   -- ^ names of variable
+    numbers  :: [M.Map String Int], -- ^ numbers of variables
+    curNum   :: Int                 -- ^ number of first free variable
   }
 
 -- | Init a database of program variables
 initPVars :: PVars
-initPVars = PVars (array (1,0) []) M.empty 1
+initPVars = PVars (array (1,0) []) [M.empty] 1
 
 -- | Class of program variables
 class Monad m => Vars m where
@@ -134,6 +147,20 @@ class Monad m => Vars m where
   newPVars :: m PVars
   newPVars = let db = initPVars in setPVars db >> return db
 
+  newContext :: m ()
+  newContext = getPVars >>= \db -> setPVars $ db {numbers = (head $ numbers db):numbers db}
+
+  endContext :: m ()
+  endContext = getPVars >>= \db -> setPVars $ db {numbers = tail (numbers db)}
+
+  newLocalVar :: d -> String -> m (Expr d)
+  newLocalVar dd name = getPVars >>= \db ->
+              let n = curNum db
+                  new_db = PVars (listArray (1,n) (name : elems (names db)))
+                                  (M.insert name n (head $ numbers db):tail (numbers db))
+                                  (n + 1)
+              in setPVars new_db >> return (Var' dd n)
+
   -- | Get the name of a program variable by its number
   namePVar :: Int -> m (Maybe String)
   namePVar n = getPVars >>= \db ->
@@ -142,18 +169,18 @@ class Monad m => Vars m where
     in return x
 
   -- | Get a program variable by its name
-  getPVarIfExist :: String -> m (Maybe Expr)
-  getPVarIfExist name = getPVars >>= \db -> return $ Var <$> M.lookup name (numbers db)
+  getPVarIfExist :: d -> String -> m (Maybe (Expr d))
+  getPVarIfExist dd name = getPVars >>= \db -> return $ (\v -> Var' dd v) <$> M.lookup name (head $ numbers db)
 
   -- | Get a program variable by its name
-  getPVar :: String -> m Expr
-  getPVar name = getPVars >>= \db -> case M.lookup name (numbers db) of
-    Just n  -> return (Var n)
+  getPVar :: d -> String -> m (Expr d)
+  getPVar dd name = getPVars >>= \db -> case M.lookup name (head $ numbers db) of
+    Just n  -> return (Var' dd n)
     Nothing -> let n = curNum db
                    new_db = PVars (listArray (1,n) (name : elems (names db)))
-                                  (M.insert name n (numbers db))
+                                  (M.insert name n (head $ numbers db):tail (numbers db))
                                   (n + 1)
-               in setPVars new_db >> return (Var n)
+               in setPVars new_db >> return (Var' dd n)
 
 -- | Class for namespace of logical symbols and program variables
 class (LSymbol.Base m, Program.Vars m) => NameSpace m

@@ -29,6 +29,7 @@ library
                        Rule
                        Term
                        Utils
+                       DebugInfo
   build-depends:       base >= 4.7 && < 5,
                        containers, strict, mtl, directory, filepath, MissingH,
                        array, regex-posix, text, parsec
