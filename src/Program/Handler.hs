@@ -174,9 +174,9 @@ eval AnySeq = putError "can't evaluate any sequence of expressions"
 
 eval x@(Bool _) = return x
 
-eval (Equal x y) = Bool' mempty <$> liftM2 (==) (eval x) (eval y)
+eval (Equal x y) = Bool <$> liftM2 (==) (eval x) (eval y)
 
-eval (NEqual x y) = Bool' mempty <$> liftM2 (/=) (eval x) (eval y)
+eval (NEqual x y) = Bool <$> liftM2 (/=) (eval x) (eval y)
 
 eval (In x y) = eval x >>= \ex -> eval y >>= \case
   (Alt   ey) -> return (Bool (ex `elem` ey))
@@ -354,7 +354,7 @@ We handle a command 'p <- g | c' as follows. First, we eval p as a list of expre
 -}
 run (Assign Select (List ls) r c : cmds) _ =
   evalL r >>= f ls >>= \ es ->
-  check c >> run cmds (return $ List' mempty es)
+  check c >> run cmds (return $ List es)
   where
     f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Handler d m [Expr d]
     f [] _ = empty

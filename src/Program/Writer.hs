@@ -81,7 +81,7 @@ instance Write ProgramS where
 
 instance Write ExprS where
   writeI _ (ClassDef base def) =
-    "class (" +>+ writeSequenceS "," (Var' EmptyInfo <$> base) (writeI False) +<>+ ")\n" +>+ indented writeProgTail def
+    "class (" +>+ writeSequenceS "," (Var <$> base :: [ExprS]) (writeI False) +<>+ ")\n" +>+ indented writeProgTail def
   writeI _ NONE     = return "NONE"
   --writeI (Val x) = write x
   writeI _ (Ref n x)  = writeVar n +<>+ "@" +>+ writeI True x
@@ -146,7 +146,7 @@ instance Write CommandS where
     indent +<>+ write0 pat +<>+ writeSequenceS "" frags (\f -> show Append +>+ write0 f) +<>+ writeWhereCond cond
   writeI _ (Assign ReplLoc pat (ClassDef base def) (Bool True)) =
     indent +<>+ "class " +>+ write0 pat
-    +<>+ "(" +>+ writeSequenceS "," (Var' EmptyInfo <$> base) (writeI False) +<>+ ")\n"
+    +<>+ "(" +>+ writeSequenceS "," (Var <$> base :: [ExprS]) (writeI False) +<>+ ")\n"
     +>+ foldr ((+<>+) . indented write0) (return "") def
   writeI _ (Assign ReplLoc pat e cond) =
     indent +<>+ "let " +>+ write0 pat +<>+ " = " +>+ write0 e +<>+ writeWhereCond cond

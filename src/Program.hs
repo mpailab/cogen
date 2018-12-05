@@ -159,7 +159,7 @@ class Monad m => Vars m where
                   new_db = PVars (listArray (1,n) (name : elems (names db)))
                                   (M.insert name n (head $ numbers db):tail (numbers db))
                                   (n + 1)
-              in setPVars new_db >> return (Var' dd n)
+              in setPVars new_db >> return (Expr (Var' n) dd)
 
   -- | Get the name of a program variable by its number
   namePVar :: Int -> m (Maybe String)
@@ -170,17 +170,17 @@ class Monad m => Vars m where
 
   -- | Get a program variable by its name
   getPVarIfExist :: d -> String -> m (Maybe (Expr d))
-  getPVarIfExist dd name = getPVars >>= \db -> return $ (\v -> Var' dd v) <$> M.lookup name (head $ numbers db)
+  getPVarIfExist dd name = getPVars >>= \db -> return $ (\v -> Expr (Var' v) dd) <$> M.lookup name (head $ numbers db)
 
   -- | Get a program variable by its name
   getPVar :: d -> String -> m (Expr d)
   getPVar dd name = getPVars >>= \db -> case M.lookup name (head $ numbers db) of
-    Just n  -> return (Var' dd n)
+    Just n  -> return (Expr (Var' n) dd)
     Nothing -> let n = curNum db
                    new_db = PVars (listArray (1,n) (name : elems (names db)))
                                   (M.insert name n (head $ numbers db):tail (numbers db))
                                   (n + 1)
-               in setPVars new_db >> return (Var' dd n)
+               in setPVars new_db >> return (Expr (Var' n) dd)
 
 -- | Class for namespace of logical symbols and program variables
 class (LSymbol.Base m, Program.Vars m) => NameSpace m

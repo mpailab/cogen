@@ -58,27 +58,27 @@ class Monoid d => IExpr d a where
 
 instance Monoid d => IExpr d Integer where
   fromExpr (Int x) = x
-  toExpr = Int' mempty
+  toExpr = Int
 
 instance Monoid d => IExpr d Bool where
   fromExpr (Bool x) = x
-  toExpr = Bool' mempty
+  toExpr = Bool
 
 instance Monoid d => IExpr d Int where
   fromExpr (Int x) = fromInteger x
-  toExpr = Int' mempty . toInteger
+  toExpr = Int . toInteger
 
 instance Monoid d => IExpr d LSymbol where
   fromExpr (Sym x) = x
-  toExpr = Sym' mempty
+  toExpr = Sym
 
 instance (Monoid d, IExpr d t) => IExpr d (Term t) where
   fromExpr (Term x) = fromExpr <$> x
-  toExpr x = Term' mempty (toExpr <$> x)
+  toExpr x = Term (toExpr <$> x)
 
 instance (Monoid d, IExpr d t) => IExpr d [t] where
   fromExpr (List xs) = map fromExpr xs
-  toExpr = List' mempty . map toExpr
+  toExpr = List . map toExpr
 
 instance Monoid d => IExpr () (Expr d) where
    fromExpr = ((\_ -> mempty) <$>)
@@ -111,17 +111,17 @@ instance ExprFuncInfo Bool where
   isb _ = False
 
 instance Monoid d => ExprFunc d Integer where
-  cbi i _ = return (Int' mempty i)
+  cbi i _ = return (Int i)
 
 instance Monoid d => ExprFunc d Bool where
-  cbi i _ = return (Bool' mempty i)
+  cbi i _ = return (Bool i)
 
 instance ExprFuncInfo [t] where
   cnt _ = 0
   isb _ = False
 
 instance (Monoid d, IExpr d t) => ExprFunc d [t] where
-  cbi l _ = return (List' mempty $ map toExpr l)
+  cbi l _ = return (List $ map toExpr l)
 
 instance (ExprFuncInfo f, IExpr () t) => ExprFuncInfo (t -> f) where
   cnt ff  = 1 + cnt (\_ -> ff 0 $ fromExpr (NONE::Expr ())) -- create dummy function of new type
@@ -194,14 +194,14 @@ combinefun f NONE = f
 
 combinefun (Fun a1 [Switch e1 (Bool True) vars1]) (Fun a2 [Switch e2 (Bool True) vars2])
   | length a1 /= length a2 = error "cannot combine function patterns with different number of arguments"
-  | List' mempty a1 /= e1 = error "cannot combine function which is not simple case of all its arguments"
-  | List' mempty a2 /= e2 = error "cannot combine function which is not simple case of all its arguments"
-  | otherwise = Fun' mempty a1 [Switch e1 (Bool' mempty True) $ vars1 ++ vars2] -- needs to rename variables a2->a1 in vars2
+  | List a1 /= e1 = error "cannot combine function which is not simple case of all its arguments"
+  | List a2 /= e2 = error "cannot combine function which is not simple case of all its arguments"
+  | otherwise = Fun a1 [Switch e1 (Bool True) $ vars1 ++ vars2] -- needs to rename variables a2->a1 in vars2
 
 combinefun (Fun a1 [Switch e1 (Bool True) vars1]) (Fun a2 cmds)
   | length a1 /= length a2 = error "cannot combine function patterns with different number of arguments"
-  | List' mempty a1 /= e1 = error "cannot combine function which is not simple case of all its arguments"
-  | otherwise = Fun' mempty a1 [Switch e1 (Bool' mempty True) $ vars1 ++ [(List' mempty a2, Bool' mempty True, cmds)]]
+  | List a1 /= e1 = error "cannot combine function which is not simple case of all its arguments"
+  | otherwise = Fun a1 [Switch e1 (Bool True) $ vars1 ++ [(List a2, Bool True, cmds)]]
 
 combinefun f@(Fun a1 cmds) _ = error "cannot combine fully defined function with another"
 combinefun _ _ = error "combinefun : cannot combine non-functional objects"
@@ -247,4 +247,4 @@ getBuiltInOps = groupBy (\(x,_) (y,_) -> prior x == prior y) $ filter (\(x,_) ->
 nameBuiltIn s = altname $ funcs (builtIn :: FuncInfo Identity ()) ! s
 
 findBIFunc :: Monoid d => String -> Maybe (Expr d)
-findBIFunc nm = Sym' mempty . IL <$> M.lookup nm (names (builtIn :: FuncInfo Identity ()))
+findBIFunc nm = Sym . IL <$> M.lookup nm (names (builtIn :: FuncInfo Identity ()))

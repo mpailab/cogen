@@ -19,6 +19,7 @@ module Expr
       -- exports
       Assign(..),
       Command(..),
+      Expr'(..),
       Expr(..),
       TExpr,
       getTerm,
@@ -32,30 +33,31 @@ module Expr
       TExpr0,
       pattern Var,
       pattern Ptr,
-      pattern  APtr,
-      pattern  Ref,
-      pattern  Sym,
-      pattern  Int,
-      pattern  Str,
-      pattern  Any,
-      pattern   AnySeq,
-      pattern  Bool,
-      pattern  Equal,
-      pattern  NEqual,
+      pattern APtr,
+      pattern Ref,
+      pattern Sym,
+      pattern Int,
+      pattern Str,
+      pattern Any,
+      pattern AnySeq,
+      pattern Bool,
+      pattern Equal,
+      pattern NEqual,
       pattern In,
       pattern Not,
-      pattern  And,
-      pattern  Or,
-      pattern  IfElse,
-      pattern  CaseOf,
-      pattern  Term,
-      pattern  Alt,
-      pattern  Tuple,
-      pattern  List,
-      pattern  Set,
-      pattern  Call,
-      pattern  Fun,
-      pattern  ClassDef
+      pattern And,
+      pattern Or,
+      pattern IfElse,
+      pattern CaseOf,
+      pattern Term,
+      pattern Alt,
+      pattern Tuple,
+      pattern List,
+      pattern Set,
+      pattern Call,
+      pattern Fun,
+      pattern ClassDef,
+      pattern NONE
     )
 where
 
@@ -81,82 +83,60 @@ type Expr0 = Expr ()
 type Command0 = Command ()
 type TExpr0 = TExpr ()
 
+data Expr d = Expr !(Expr' d) !d
+  deriving (Functor, Foldable)
+
 -- | Type of expressions
-data Expr d
+data Expr' d
 
   -- Simple expressions:
-  = Var' d Var            -- ^ program variable
-  | Ptr' d Var (Expr d)   -- ^ pointer to expression
-  | APtr' d Var           -- ^ pointer to mutable variable in left part of assign expression
-  | Ref' d Var (Expr d)   -- ^ reference to expression
+  = Var' Var            -- ^ program variable
+  | Ptr' Var (Expr d)   -- ^ pointer to expression
+  | APtr' Var           -- ^ pointer to mutable variable in left part of assign expression
+  | Ref' Var (Expr d)   -- ^ reference to expression
 
   -- Constant expressions:
-  | Sym' d LSymbol   -- ^ logical symbol
-  | Int' d Integer   -- ^ integer
-  | Str' d String    -- ^ string
-  | Any' d           -- ^ any expression
-  | AnySeq' d        -- ^ any sequence of expressions
+  | Sym' LSymbol   -- ^ logical symbol
+  | Int' Integer   -- ^ integer
+  | Str' String    -- ^ string
+  | Any'           -- ^ any expression
+  | AnySeq'        -- ^ any sequence of expressions
 
     -- Boolean expressions:
-  | Bool' d Bool                 -- ^ Boolean constant (True or False)
-  | Equal' d (Expr d) (Expr d)   -- ^ statement A eq B
-  | NEqual' d (Expr d) (Expr d)  -- ^ statement A ne B
-  | In' d (Expr d) (Expr d)      -- ^ statement A in B
-  | Not' d (Expr d)              -- ^ statement not A
-  | And' d [Expr d]              -- ^ statement A and B
-  | Or' d [Expr d]               -- ^ statement A or B
+  | Bool' Bool                 -- ^ Boolean constant (True or False)
+  | Equal' (Expr d) (Expr d)   -- ^ statement A eq B
+  | NEqual' (Expr d) (Expr d)  -- ^ statement A ne B
+  | In' (Expr d) (Expr d)      -- ^ statement A in B
+  | Not' (Expr d)              -- ^ statement not A
+  | And' [Expr d]              -- ^ statement A and B
+  | Or' [Expr d]               -- ^ statement A or B
 
   -- Conditional expressions:
-  | IfElse' d (Expr d) (Expr d) (Expr d)  -- ^ conditional expression
-  | CaseOf' d (Expr d) [(Expr d, Expr d)] -- ^ switching expression
+  | IfElse' (Expr d) (Expr d) (Expr d)  -- ^ conditional expression
+  | CaseOf' (Expr d) [(Expr d, Expr d)] -- ^ switching expression
 
   -- Composite expressions:
-  | Term'  d (TExpr d)             -- ^ term over expressions
-  | Alt'   d [Expr d]              -- ^ alternating of expressions
-  | Tuple' d [Expr d]              -- ^ tuple of expressions
-  | List'  d [Expr d]              -- ^ list of expressions
-  | Set'   d [Expr d]              -- ^ set of expressions
+  | Term'  (TExpr d)             -- ^ term over expressions
+  | Alt'   [Expr d]              -- ^ alternating of expressions
+  | Tuple' [Expr d]              -- ^ tuple of expressions
+  | List'  [Expr d]              -- ^ list of expressions
+  | Set'   [Expr d]              -- ^ set of expressions
 
   -- Functional expressions:
-  | Call' d (Expr d) [Expr d]   -- ^ partial function call
-  | Fun' d [Expr d] [Command d] -- ^ partial function definiton
+  | Call' (Expr d) [Expr d]   -- ^ partial function call
+  | Fun' [Expr d] [Command d] -- ^ partial function definiton
 
   | Class (M.Map Var (Expr d))   -- ^ class instance
-  | ClassDef' d [Var] [Command d] -- ^ class definition; evaluated to Class
+  | ClassDef' [Var] [Command d] -- ^ class definition; evaluated to Class
 
   -- Undefined expression:
-  | NONE
+  | NONE'
 
   deriving (Eq, Ord, Show, Functor, Foldable)
 
 
 
-dbginfo (Var' d _) = d
-dbginfo (Ptr' d _ _) = d
-dbginfo (APtr' d _) = d
-dbginfo (Ref' d _ _) = d
-dbginfo (Sym' d _) = d
-dbginfo (Int' d _) = d
-dbginfo (Str' d _) = d
-dbginfo (Any' d) = d
-dbginfo (AnySeq' d) = d
-dbginfo (Bool' d _) = d
-dbginfo (Equal' d _ _) = d
-dbginfo (NEqual' d _ _) = d
-dbginfo (In' d _ _) = d
-dbginfo (Not' d _) = d
-dbginfo (And' d _) = d
-dbginfo (Or' d _) = d
-dbginfo (IfElse' d _ _ _) = d
-dbginfo (CaseOf' d _ _) = d
-dbginfo (Term'  d _) = d
-dbginfo (Alt'   d _) = d
-dbginfo (Tuple' d _) = d
-dbginfo (List'  d _) = d
-dbginfo (Set'   d _) = d
-dbginfo (Call' d _ _) = d
-dbginfo (Fun' d _ _) = d
-dbginfo (ClassDef' d _ _) = d
+dbginfo (Expr _ d) = d
 
 pattern Var      :: Monoid d => Var -> Expr d
 pattern Ptr      :: Monoid d => Var -> Expr d -> Expr d
@@ -183,34 +163,98 @@ pattern List     :: Monoid d => [Expr d] -> Expr d
 pattern Set      :: Monoid d => [Expr d] -> Expr d
 pattern Call     :: Monoid d => Expr d -> [Expr d] -> Expr d
 pattern Fun      :: Monoid d => [Expr d] -> [Command d] -> Expr d
+pattern NONE     :: Monoid d => Expr d
 pattern ClassDef :: Monoid d => [Var] -> [Command d] -> Expr d
 
-pattern Var x        <- Var' _ x  where       Var x = Var' mempty x
-pattern Ptr x y      <- Ptr' _ x y where      Ptr x y      = Ptr' mempty x y
-pattern APtr x       <- APtr' _ x where       APtr x       = APtr' mempty x
-pattern Ref x y      <- Ref' _ x y where      Ref x y      = Ref' mempty x y
-pattern Sym x        <- Sym' _ x where        Sym x        = Sym' mempty x
-pattern Int x        <- Int' _ x where        Int x        = Int' mempty x
-pattern Str x        <- Str' _ x where        Str x        = Str' mempty x
-pattern Any          <- Any' _ where          Any          = Any' mempty
-pattern AnySeq       <- AnySeq' _ where       AnySeq       = AnySeq' mempty
-pattern Bool x       <- Bool' _ x where       Bool x       = Bool' mempty x
-pattern Equal x y    <- Equal' _ x y where    Equal x y    = Equal' mempty x y
-pattern NEqual x y   <- NEqual' _ x y where   NEqual x y   = NEqual' mempty x y
-pattern In x y       <- In' _ x y where       In x y       = In' mempty x y
-pattern Not x        <- Not' _ x where        Not x        = Not' mempty x
-pattern And x        <- And' _ x where        And x        = And' mempty x
-pattern Or x         <- Or' _ x where         Or x         = Or' mempty x
-pattern IfElse x y z <- IfElse' _ x y z where IfElse x y z = IfElse' mempty x y z
-pattern CaseOf x y   <- CaseOf' _ x y where   CaseOf x y   = CaseOf' mempty x y
-pattern Term x       <- Term' _ x where       Term x       = Term' mempty x
-pattern Alt x        <- Alt' _ x where        Alt x        = Alt' mempty x
-pattern Tuple x      <- Tuple' _ x where      Tuple x      = Tuple' mempty x
-pattern List x       <- List' _ x where       List x       = List' mempty x
-pattern Set x        <- Set' _ x where        Set x        = Set' mempty x
-pattern Call x y     <- Call' _ x y where     Call x y     = Call' mempty x y
-pattern Fun x y      <- Fun' _ x y where      Fun x y      = Fun' mempty x y
-pattern ClassDef x y <- ClassDef' _ x y where ClassDef x y = ClassDef' mempty x y
+instance Eq (Expr d) where
+  (==) (Expr x _) (Expr y _) = x == y
+
+instance Ord (Expr d) where
+  (<=) (Expr x _) (Expr y _) = x <= y
+
+instance Show (Expr d) where
+  show (Expr x _) = show x
+
+pattern Var x <- Expr (Var' x) _ where
+  Var x = Expr (Var' x) mempty
+
+pattern Ptr x e <- Expr (Ptr' x e) _ where
+  Ptr x e = Expr (Ptr' x e) mempty
+
+pattern APtr x <- Expr (APtr' x) _ where
+  APtr x = Expr (APtr' x) mempty
+
+pattern Ref x e <- Expr (Ref' x e) _ where
+  Ref x e = Expr (Ref' x e) mempty
+
+pattern Sym x <- Expr (Sym' x) _ where
+  Sym x = Expr (Sym' x) mempty
+
+pattern Int x <- Expr (Int' x) _ where
+  Int x = Expr (Int' x) mempty
+
+pattern Str x <- Expr (Str' x) _ where
+  Str x = Expr (Str' x) mempty
+
+pattern Any <- Expr Any' _ where
+  Any = Expr Any' mempty
+
+pattern AnySeq <- Expr AnySeq' _ where
+  AnySeq = Expr AnySeq' mempty
+
+pattern Bool x <- Expr (Bool' x) _ where
+  Bool x = Expr (Bool' x) mempty
+
+pattern Equal x y <- Expr (Equal' x y) _ where
+  Equal x y = Expr (Equal' x y) mempty
+
+pattern NEqual x y <- Expr (NEqual' x y) _ where
+  NEqual x y = Expr (NEqual' x y) mempty
+
+pattern In x y <- Expr (In' x y) _ where
+  In x y = Expr (In' x y) mempty
+
+pattern Not x <- Expr (Not' x) _ where
+  Not x = Expr (Not' x) mempty
+
+pattern And x <- Expr (And' x) _ where
+  And x = Expr (And' x) mempty
+
+pattern Or x <- Expr (Or' x) _ where
+  Or x = Expr (Or' x) mempty
+
+pattern IfElse x y z <- Expr (IfElse' x y z) _ where
+  IfElse x y z = Expr (IfElse' x y z) mempty
+
+pattern CaseOf x y <- Expr (CaseOf' x y) _ where
+  CaseOf x y = Expr (CaseOf' x y) mempty
+
+pattern Term x <- Expr (Term' x) _ where
+  Term x = Expr (Term' x) mempty
+
+pattern Alt x <- Expr (Alt' x) _ where
+  Alt x = Expr (Alt' x) mempty
+
+pattern Tuple x <- Expr (Tuple' x) _ where
+  Tuple x = Expr (Tuple' x) mempty
+
+pattern List x <- Expr (List' x) _ where
+  List x = Expr (List' x) mempty
+
+pattern Set x <- Expr (Set' x) _ where
+  Set x = Expr (Set' x) mempty
+
+pattern Call x y <- Expr (Call' x y) _ where
+  Call x y = Expr (Call' x y) mempty
+
+pattern Fun x y <- Expr (Fun' x y) _ where
+  Fun x y = Expr (Fun' x y) mempty
+
+pattern ClassDef x y <- Expr (ClassDef' x y) _ where
+  ClassDef x y = Expr (ClassDef' x y) mempty
+
+pattern NONE <- Expr NONE' _ where
+  NONE = Expr NONE' mempty
 
 getTerm (Term x) = x
 getList (List x) = x
