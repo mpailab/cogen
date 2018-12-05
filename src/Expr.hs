@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP                  #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE PatternSynonyms      #-}
 {-# LANGUAGE RankNTypes           #-}
@@ -21,6 +22,8 @@ module Expr
       Expr(..),
       TExpr,
       Var,
+#ifdef DEBUG
+      Debug(..),
       pattern Var,
       pattern Ptr,
       pattern APtr,
@@ -49,6 +52,7 @@ module Expr
       pattern NONE,
       getList,
       getTerm
+#endif
     )
 where
 
@@ -63,6 +67,8 @@ import           Term
 
 type Var = Int
 type TExpr = Term Expr
+
+#ifdef DEBUG
 
 data Debug = EmptyDBG
 
@@ -205,6 +211,55 @@ data Expr'
   | NONE'
 
   deriving (Eq, Ord, Show)
+
+#else
+
+-- | Type of expressions
+data Expr
+
+  -- Simple expressions:
+  = Var Var        -- ^ program variable
+  | Ptr Var Expr   -- ^ pointer to expression
+  | APtr Var       -- ^ pointer to mutable variable in left part of assign expression
+  | Ref Var Expr   -- ^ reference to expression
+
+  -- Constant expressions:
+  | Sym LSymbol    -- ^ logical symbol
+  | Int Integer    -- ^ integer
+  | Str String     -- ^ string
+  | Any            -- ^ any expression
+  | AnySeq         -- ^ any sequence of expressions
+
+    -- Boolean expressions:
+  | Bool Bool         -- ^ Boolean constant (True or False)
+  | Equal Expr Expr   -- ^ statement A eq B
+  | NEqual Expr Expr  -- ^ statement A ne B
+  | In Expr Expr      -- ^ statement A in B
+  | Not Expr          -- ^ statement not A
+  | And [Expr]        -- ^ statement A and B
+  | Or [Expr]         -- ^ statement A or B
+
+  -- Conditional expressions:
+  | IfElse Expr Expr Expr      -- ^ conditional expression
+  | CaseOf Expr [(Expr, Expr)] -- ^ switching expression
+
+  -- Composite expressions:
+  | Term  { getTerm :: TExpr }  -- ^ term over expressions
+  | Alt   [Expr]                -- ^ alternating of expressions
+  | Tuple [Expr]                -- ^ tuple of expressions
+  | List  { getList :: [Expr] } -- ^ list of expressions
+  | Set   [Expr]                -- ^ set of expressions
+
+  -- Functional expressions:
+  | Call Expr  [Expr]    -- ^ partial function call
+  | Fun [Expr] [Command] -- ^ partial function definiton
+
+  -- Undefined expression:
+  | NONE
+
+  deriving (Eq, Ord, Show)
+
+#endif
 
 -- | type of assigning
 data Assign
