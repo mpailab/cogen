@@ -1,0 +1,31 @@
+-- some example definitions of ranges
+-- later they can be added as built-in operators
+enclosing [x,y..] =
+    mutable t, d = x, y-x
+    repeat
+    yield t
+    t := t+d
+
+enclosing [x,y..z] =
+    t <- [x,y..]
+    if t>z then exit
+    yield t
+
+enclosing [x..] = [x,x+1..]
+enclosing [x..y] = [x,x+1..y]
+
+oddprime x =
+    q <- [3,5..]
+    if x % q then return false
+    if q*q>x then return true
+
+primes = 2:filter oddprime [3,5..]
+
+twin = tw primes
+    where tw [p1,p2,qs@__] = if p2==p1+2 then p1:(tw qs) else tw (p2:qs)
+
+twinpair = gd twin
+    where gd [p1,p2,qs@__] = if p2==p1+6 then p1:(gd qs) else gd (p2:qs)
+
+main = do
+    print $ (take 100 twinpair)

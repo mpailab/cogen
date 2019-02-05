@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 
 {-|
-Module      : Program.Writer
+Module      : ProgramS.Writer
 Description : Programs writer
 Copyright   : (c) Grigoriy Bokov 2017-2018
 License     : GPL-3
@@ -32,6 +32,7 @@ import           Program
 import           Term
 import           Utils
 import           Program.BuiltIn
+import           DebugInfo
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
@@ -75,10 +76,12 @@ class Write a where
             where wrI :: NameSpace m => SimpleWriter m String
                   wrI = writeI False x
 
-instance Write Program where
+instance Write ProgramS where
   writeI _ = writeProgram
 
-instance Write Expr where
+instance Write ExprS where
+  writeI _ (ClassDef base def) =
+    "class (" +>+ writeSequenceS "," (Var <$> base :: [ExprS]) (writeI False) +<>+ ")\n" +>+ indented writeProgTail def
   writeI _ NONE     = return "NONE"
   --writeI (Val x) = write x
   writeI _ (Ref n x)  = writeVar n +<>+ "@" +>+ writeI True x
@@ -127,7 +130,7 @@ instance Write Expr where
   --                  writeSequenceS "" f (indented writeStmt)
   --                ) +<>+ indent +<+ ">}"
 
-instance Write TExpr where
+instance Write TExprS where
   --writeI par = writeTerm par
   writeI par (T x)     = writeI par x
   writeI par (x :> y)  = inpars par $ writeI True x +<>+
@@ -135,13 +138,17 @@ instance Write TExpr where
   writeI par (x :>> y) = inpars par $ writeI True x +<>+ " " +>+ writeI True y
 
 
-instance Write Command where
+instance Write CommandS where
   writeI _ (Assign Select pat (List [val]) cond) =
     indent +<>+ write0 pat +<>+ " = " +>+ write0 val +<>+ writeWhereCond cond
 
   writeI _ (Assign Append pat (List frags) cond) =
-      indent +<>+ write0 pat +<>+ writeSequenceS "" frags (\f -> show Append +>+ write0 f) +<>+ writeWhereCond cond
-  writeI _ (Assign ReplLoc pat e cond) = 
+    indent +<>+ write0 pat +<>+ writeSequenceS "" frags (\f -> show Append +>+ write0 f) +<>+ writeWhereCond cond
+  writeI _ (Assign ReplLoc pat (ClassDef base def) (Bool True)) =
+    indent +<>+ "class " +>+ write0 pat
+    +<>+ "(" +>+ writeSequenceS "," (Var <$> base :: [ExprS]) (writeI False) +<>+ ")\n"
+    +>+ foldr ((+<>+) . indented write0) (return "") def
+  writeI _ (Assign ReplLoc pat e cond) =
     indent +<>+ "let " +>+ write0 pat +<>+ " = " +>+ write0 e +<>+ writeWhereCond cond
 
   writeI _ (Assign tp pat gen cond) =
@@ -208,14 +215,14 @@ writeIndent :: ProgWriter m => Int -> m String
 writeIndent 0 = return ""
 writeIndent n = writeIndent (n-1) >>= \x -> return (' ' : ' ' : x)
 
-writeWhere :: ProgWriter m => [Expr] -> m String
+writeWhere :: ProgWriter m => [ExprS] -> m String
 writeWhere = foldr (\ t -> (+<>+) (indent +<>+ write0 t +<+ "\n")) (return "")
 
 writeHeader :: ProgWriter m => Header -> m String
 writeHeader (Header name vars) =
   indent  +<>+ writeVar name +<>+ " " +>+ (unwords <$> mapM writeVar vars) +<+ " =\n"
 
-writeWhereCond :: ProgWriter m => Expr -> m String
+writeWhereCond :: ProgWriter m => ExprS -> m String
 writeWhereCond (Bool True) = return "\n"
 writeWhereCond (And conds) = "\n" +>+
   indent +<>+
@@ -225,15 +232,15 @@ writeWhereCond cond = " where " +>+ write0 cond +<+ "\n"
 
 -- | Write an assigning instruction of program fragment corresponding to a given indent
 
-writeProgTail :: ProgWriter m => [Command] -> m String
+writeProgTail :: ProgWriter m => [CommandS] -> m String
 writeProgTail = foldr ((+<>+) . indented write0) (indent +<+ "done\n") -- +<>+ writeProgTail ind ss
 --writeProgTail ind [] = writeIndent ind +<+ "done\n"
 
 -- | Write a program fragment corresponding to a given indent
-writeProgram :: ProgWriter m => Program -> m String
+writeProgram :: ProgWriter m => ProgramS -> m String
 writeProgram (Program h s) = writeHeader h +<>+ writeProgTail s
 
-writeSwitchCases :: ProgWriter m => [(Expr, Expr, [Command])] -> m String
+writeSwitchCases :: ProgWriter m => [(ExprS, ExprS, [CommandS])] -> m String
 writeSwitchCases ((pat,cond,prog):cs) =
   indent +<>+ write0 pat +<>+ indented writeWhereCond cond +<>+
   indent +<>+ "do\n" +>+

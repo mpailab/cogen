@@ -33,13 +33,13 @@ import           Program
 -- Data and type declaration
 
 -- | Type of monad Globe
-type Global = StateT Info IO
+type Global = StateT InfoS IO
 
 -- | Type of global informational structure
-data Info = Info
+data InfoS = Info
   {
     lsymbols :: LSymbols, -- ^ database of logical symbols
-    programs :: Programs, -- ^ database of programs
+    programs :: ProgramsS, -- ^ database of programs
     pvars    :: PVars     -- ^ database of program variables
   }
 

@@ -26,8 +26,8 @@ test 1 = do
     let in_file = "test/specs/1.coral"
     let out_file = "test/specs/1.out"
     prog_str <- liftIO $ readFile in_file
-    e <- parse prog_str in_file
-    let f = handle e
+    e :: ExprS <- parse prog_str in_file
+    let f = (handle :: ExprS -> ExprS -> Global ExprS) e
     liftIO . writeFile out_file =<< write =<< f =<< f NONE
     return True
 
@@ -35,7 +35,7 @@ test 2 = do
     load "database/lsymbols.db" >>= setLSymbols
     let file = "database/programs/before.coral"
     prog_str <- liftIO $ readFile file
-    prog :: Program <- parse prog_str file
+    prog :: ProgramS <- parse prog_str file
     liftIO . writeFile "database/programs/after.coral" =<< write prog
     return True
 
@@ -43,7 +43,7 @@ test 3 = do
     load "database/lsymbols.db" >>= setLSymbols
     let file = "database/programs/before1.coral"
     prog_str <- liftIO $ readFile file
-    prog :: Program <- parse prog_str file
+    prog :: ProgramS <- parse prog_str file
     liftIO . writeFile "database/programs/after1.coral" =<< write prog
     return True
 

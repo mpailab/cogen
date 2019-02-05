@@ -4,6 +4,9 @@
 {-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE Rank2Types                #-}
 {-# LANGUAGE TypeSynonymInstances      #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE FlexibleContexts          #-}
+{-# LANGUAGE IncoherentInstances       #-}
 
 {-|
 Module      : Program.Handler
@@ -44,97 +47,113 @@ import           Term
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-data BuiltInFunc m = BuiltInFunc {
+data BuiltInFunc m d = BuiltInFunc {
   arity :: Int,
-  funct :: Monad m => [Expr] -> m Expr
+  funct :: Monad m => [Expr d] -> m (Expr d)
 }
 
-class IExpr a where
-  fromExpr :: Expr -> a
-  toExpr   :: a -> Expr
+class Monoid d => IExpr d a where
+  fromExpr :: Expr d -> a
+  toExpr   :: a -> Expr d
 
-instance IExpr Integer where
+instance Monoid d => IExpr d Integer where
   fromExpr (Int x) = x
   toExpr = Int
 
-instance IExpr Bool where
+instance Monoid d => IExpr d Bool where
   fromExpr (Bool x) = x
   toExpr = Bool
 
-instance IExpr Int where
+instance Monoid d => IExpr d Int where
   fromExpr (Int x) = fromInteger x
   toExpr = Int . toInteger
 
-instance IExpr LSymbol where
+instance Monoid d => IExpr d LSymbol where
   fromExpr (Sym x) = x
   toExpr = Sym
 
-instance IExpr t => IExpr (Term t) where
+instance (Monoid d, IExpr d t) => IExpr d (Term t) where
   fromExpr (Term x) = fromExpr <$> x
   toExpr x = Term (toExpr <$> x)
 
-instance IExpr t => IExpr [t] where
+instance (Monoid d, IExpr d t) => IExpr d [t] where
   fromExpr (List xs) = map fromExpr xs
   toExpr = List . map toExpr
 
-instance IExpr Expr where
+instance Monoid d => IExpr () (Expr d) where
+   fromExpr = ((\_ -> mempty) <$>)
+   toExpr   = ((\_ -> ()) <$>)
+
+instance Monoid d => IExpr d (Expr d) where
   fromExpr = id
   toExpr   = id
 
-class ExprFunc a where
-  cbi :: Monad m => a -> [Expr] -> m Expr
+class ExprFuncInfo a where
   cnt :: (Int -> a) -> Int
   isb :: (Int -> a) -> Bool
 
-instance ExprFunc Expr where
+class ExprFuncInfo a => ExprFunc d a where
+  cbi :: Monad m => a -> [Expr d] -> m (Expr d)
+
+instance ExprFuncInfo (Expr d) where
+  cnt _ = 0
+  isb _ = False
+
+instance ExprFunc d (Expr d) where
   cbi ff _ = return ff
+
+instance ExprFuncInfo Integer where
   cnt _ = 0
   isb _ = False
 
-instance ExprFunc Integer where
+instance ExprFuncInfo Bool where
+  cnt _ = 0
+  isb _ = False
+
+instance Monoid d => ExprFunc d Integer where
   cbi i _ = return (Int i)
-  cnt _ = 0
-  isb _ = False
 
-instance ExprFunc Bool where
+instance Monoid d => ExprFunc d Bool where
   cbi i _ = return (Bool i)
-  cnt _ = 0
-  isb _ = True
 
-instance IExpr t => ExprFunc [t] where
-  cbi l _ = return (List $ map toExpr l)
+instance ExprFuncInfo [t] where
   cnt _ = 0
   isb _ = False
 
-instance (ExprFunc f, IExpr t) => ExprFunc (t -> f) where
-  cbi ff (x:args) = cbi (ff $ fromExpr x) $ args
-  cnt ff = 1 + cnt (\_ -> ff 0 $ fromExpr NONE) -- create dummy function of new type
-  isb ff = isb (\_ -> ff 0 $ fromExpr NONE) -- create dummy function of new type
+instance (Monoid d, IExpr d t) => ExprFunc d [t] where
+  cbi l _ = return (List $ map toExpr l)
 
-type BuiltInFuncs m = M.Map Int (BuiltInFunc m)
+instance (ExprFuncInfo f, IExpr () t) => ExprFuncInfo (t -> f) where
+  cnt ff  = 1 + cnt (\_ -> ff 0 $ fromExpr (NONE::Expr ())) -- create dummy function of new type
+  isb ff = isb (\_ -> ff 0 $ fromExpr (NONE::Expr ())) -- create dummy function of new type
+
+instance (Monoid d, ExprFunc d f, IExpr () t, IExpr d t) => ExprFunc d (t -> f) where
+  cbi ff (x:args) = cbi (ff $ fromExpr x) $ args
+
+type BuiltInFuncs m d = M.Map Int (BuiltInFunc m d)
 type FuncNames = M.Map String Int
 
-convf :: (Monad m, ExprFunc f) => f -> BuiltInFunc m
-convf f = BuiltInFunc { arity = cnt (\_ -> f), funct = cbi f}
+convf :: (Monoid d,Monad m, ExprFunc d f) => f -> BuiltInFunc m d
+convf ff = BuiltInFunc { arity = cnt (\_ -> ff), funct = cbi ff}
 
-data BIFunc m = BIFunc {
+data BIFunc m d = BIFunc {
   fname :: String,
   altname :: String,
   prior :: Int,
   assoc :: Assoc,
   commut :: Int, -- ^ 0 : not commutative, 1 : commutative, 2 : apply in parser
   isbool :: Bool,
-  fun :: BuiltInFunc m,
+  fun :: BuiltInFunc m d,
   isOp :: Bool
 }
 
-data FuncInfo m = FuncInfo {
-  funcs :: Array Int (BIFunc m),
+data FuncInfo m d = FuncInfo {
+  funcs :: Array Int (BIFunc m d),
   names :: M.Map String Int,
   nf    :: Int
 }
 
-registerFunctions :: Monad m => [BIFunc m] -> FuncInfo m
+registerFunctions :: Monad m => [BIFunc m d] -> FuncInfo m d
 registerFunctions l = FuncInfo {
                                 funcs = listArray (0,len-1) l,
                                 names = M.fromList $ zip (fname <$> l) [0..len-1],
@@ -145,7 +164,7 @@ registerFunctions l = FuncInfo {
 type Bin m = m -> m -> m
 type Un m = m -> m
 
-op :: (Monad m, ExprFunc f) => Assoc -> Int -> String -> String -> Int -> f -> BIFunc m
+op :: (Monoid d,Monad m, ExprFunc d f) => Assoc -> Int -> String -> String -> Int -> f -> BIFunc m d
 op a c nm altnm pr f = BIFunc {
   fname = nm,
   altname = altnm,
@@ -157,7 +176,7 @@ op a c nm altnm pr f = BIFunc {
   isOp = True
 }
 
-bfun :: (Monad m, ExprFunc f) => String -> f -> BIFunc m
+bfun :: (Monoid d,Monad m, ExprFunc d f) => String -> f -> BIFunc m d
 bfun nm f = BIFunc {
   fname = nm,
   altname = nm,
@@ -169,7 +188,7 @@ bfun nm f = BIFunc {
   isOp = False
 }
 
-combinefun :: Expr -> Expr -> Expr
+combinefun :: (Monoid d, Eq d) => (Expr d) -> (Expr d) -> (Expr d)
 combinefun NONE f = f
 combinefun f NONE = f
 
@@ -188,7 +207,7 @@ combinefun f@(Fun a1 cmds) _ = error "cannot combine fully defined function with
 combinefun _ _ = error "combinefun : cannot combine non-functional objects"
 
 
-builtIn :: Monad m => FuncInfo m
+builtIn :: forall d m. (Monoid d, Ord d, Eq d, IExpr () (Expr d), Monad m) => FuncInfo m d
 builtIn = registerFunctions [
     --(".",   convf (\f g -> ))
     --op "~"  10 (complement :: Un Integer),
@@ -202,30 +221,30 @@ builtIn = registerFunctions [
     op AssocLeft  1 "+"   "add"      6  ((+)  :: Bin Integer),
     op AssocLeft  0 "-"   "subtract" 6  ((-)  :: Bin Integer),
     op AssocLeft  1 ".^." "xor"      6  (xor  :: Bin Integer),
-    op AssocLeft  1 "++"  "concat"   5  ((++) :: Bin [Expr]),
+    op AssocLeft  1 "++"  "concat"   5  ((++) :: Bin [Expr d]),
     op AssocLeft  1 ".|." "bitor"    5  ((.|.) :: Bin Integer),
-    op AssocLeft  0 "<="  "leq"      4  ((<=) :: Expr->Expr->Bool),
-    op AssocLeft  0 "<"   "lt"       4  ((<)  :: Expr->Expr->Bool),
-    op AssocLeft  0 ">="  "geq"      4  ((>=) :: Expr->Expr->Bool),
-    op AssocLeft  0 ">"   "gt"       4  ((>)  :: Expr->Expr->Bool),
-    op AssocLeft  0 "=="  "eq"       3  ((==) :: Expr->Expr->Bool),
-    op AssocLeft  0 "!="  "neq"      3  ((/=) :: Expr->Expr->Bool),
-    bfun "listElem" ((!!) :: [Expr] -> Int -> Expr),
+    op AssocLeft  0 "<="  "leq"      4  ((<=) :: Expr d->Expr d->Bool),
+    op AssocLeft  0 "<"   "lt"       4  ((<)  :: Expr d->Expr d->Bool),
+    op AssocLeft  0 ">="  "geq"      4  ((>=) :: Expr d->Expr d->Bool),
+    op AssocLeft  0 ">"   "gt"       4  ((>)  :: Expr d->Expr d->Bool),
+    op AssocLeft  0 "=="  "eq"       3  ((==) :: Expr d->Expr d->Bool),
+    op AssocLeft  0 "!="  "neq"      3  ((/=) :: Expr d->Expr d->Bool),
+    bfun "listElem" ((!!) :: [Expr d] -> Int -> Expr d),
     --op AssocLeft  0 "in"  "member"   3  ()
     --op AssocRight 2 "$"   "apply"    0  (\x y -> Call x [y]),
-    bfun "header" (header :: Term Expr -> Expr),
-    bfun "combinefun" combinefun
+    bfun "header" (header :: Term (Expr d) -> Expr d),
+    bfun "combinefun" (combinefun::Bin (Expr d))
   ]
 
-getBuiltInFunc :: Monad m => Int -> Maybe (BuiltInFunc m)
+getBuiltInFunc :: (Monoid d,Ord d,IExpr () (Expr d),Monad m) => Int -> Maybe (BuiltInFunc m d)
 getBuiltInFunc i = if i < length f then Just . fun $ f ! i else Nothing
                    where f = funcs builtIn
 
-getBuiltInOps :: [[(BIFunc Identity,Int)]]
+getBuiltInOps :: forall d. (Ord d,Monoid d) => [[(BIFunc Identity d,Int)]]
 getBuiltInOps = groupBy (\(x,_) (y,_) -> prior x == prior y) $ filter (\(x,_) -> isOp x) $ zip (elems $ funcs bi) [0..nf bi -1]
-                where bi = (builtIn :: FuncInfo Identity)
+                where bi = (builtIn :: FuncInfo Identity d)
 
-nameBuiltIn s = altname $ funcs (builtIn :: FuncInfo Identity) ! s
+nameBuiltIn s = altname $ funcs (builtIn :: FuncInfo Identity ()) ! s
 
-findBIFunc :: String -> Maybe Expr
-findBIFunc nm = Sym . IL <$> M.lookup nm (names (builtIn :: FuncInfo Identity))
+findBIFunc :: Monoid d => String -> Maybe (Expr d)
+findBIFunc nm = Sym . IL <$> M.lookup nm (names (builtIn :: FuncInfo Identity ()))

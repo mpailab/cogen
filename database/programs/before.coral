@@ -1,13 +1,15 @@
 f arg thrm =
+      class A(B,C)
+        x = 0
+        y = 1
+      f a b = c
       infixr 6 x ** y = x^y
       prefix 7 //x # y// = x+y
       postfix 200 x[[a]] = listElem x a
       postfix 150 x-[a, ... ] = x # a
       x = y ()
       s <- f d[[0]] y-[s,d,f]
-      {-
-        Comment 1
-      -}
+      {-  Comment 1  -}
       case thrm of
         forall-[boundVariables vars, premises prems, conclusion-[concl]] where vars == thrm
         do

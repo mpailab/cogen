@@ -41,7 +41,7 @@ import           Utils
 
 -- | Database instance for programs
 instance (NameSpace m, Program.Base m, MonadIO m) =>
-         Database String Programs m where
+         Database String ProgramsS m where
 
   -- | Load the database of programs from a given directory
   load dir = do
@@ -66,12 +66,12 @@ instance (NameSpace m, Program.Base m, MonadIO m) =>
     liftIO $ createDirectoryIfMissing True dir
     mapM_ f (M.assocs db)
     where
-      f :: (NameSpace m, Program.Base m, MonadIO m) => (LSymbol, Program) -> m ()
+      f :: (NameSpace m, Program.Base m, MonadIO m) => (LSymbol, ProgramS) -> m ()
       f (s, p) = join $ liftM2 writeFileM (dir +>+ nameLSymbol s +<+ ".db") (write p)
 
 -- | Database instance for program
 instance (NameSpace m, Program.Base m, MonadIO m) =>
-         Database (String, LSymbol) Program m where
+         Database (String, LSymbol) ProgramS m where
 
   -- | Load a program of logical symbol from a database saved in given directory
   load (dir, s) = do
