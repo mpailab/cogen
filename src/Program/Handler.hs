@@ -1,5 +1,6 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE InstanceSigs              #-}
 {-# LANGUAGE LambdaCase                #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE Rank2Types                #-}
@@ -17,7 +18,13 @@ Portability : POSIX
 module Program.Handler
     (
       -- exports
-      handle
+      Program.Handler.Base,
+      eval,
+      getState,
+      initState,
+      run,
+      setState,
+      Program.Handler.State(..)
     )
 where
 
@@ -28,51 +35,68 @@ import           Data.Foldable
 import qualified Data.Map            as M
 
 -- Internal imports
+import           DebugInfo
 import           Expr
 import           LSymbol
 import           Program
 import           Program.BuiltIn
 import           Term
-import           DebugInfo
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
 
-class DebugInfo d => Handle d a where
-  handle :: Expr d -> a
+type Subst m d = Expr d -> Handler d m ()
 
-instance (DebugInfo d, Monad m) => Handle d (m (Expr d)) where
-  handle e = evalHandler (eval e) (Info M.empty M.empty)
-
-instance Handle d a => Handle d (Expr d -> a) where
-  handle (Fun (x:xs) cmds) e = let cmd = Assign Simple x e (Bool True)
-                               in handle (Fun xs (cmd:cmds))
-
-type Values d = M.Map Var (Expr d)
-type Swap m d = Expr d -> Handler d m ()
-type Swaps m d = M.Map Var (Swap m d)
-
-data Info m d = Info
+newtype State m d = State
   {
-    vals  :: Values d,
-    swaps :: Swaps m d
+    vals :: M.Map Var (Expr d, Subst m d)
   }
 
-data Eval a
+-- | Base handler class
+class (Monad m, DebugInfo d) => Base m d where
+  getState :: m (Program.Handler.State m d)
+  setState :: Program.Handler.State m d -> m ()
+
+-- | Init the handler state
+initState :: (Monad m, DebugInfo d) => Program.Handler.State m d
+initState = Program.Handler.State M.empty
+
+class DebugInfo d => Handle d a where
+  eval :: Expr d -> a
+  run  :: Command d -> a
+
+instance (DebugInfo d, Program.Handler.Base m d) => Handle d (m (Expr d)) where
+  eval :: Expr d -> m (Expr d)
+  eval e = getState >>= runHandler (evalI e) >>= \ ~(a,s) -> case a of
+    Value x   -> setState s >> return x
+    Error err -> error $ "Handler error: " ++ err ++ ".\n"
+
+  run :: Command d -> m (Expr d)
+  run cmd = getState >>= runHandler (runI [cmd] (return NONE)) >>= \ ~(a,s) -> case a of
+    Value x   -> setState s >> return x
+    Error err -> error $ "Handler error: " ++ err ++ ".\n"
+
+instance Handle d a => Handle d (Expr d -> a) where
+  eval :: Expr d -> Expr d -> a
+  eval (Fun (x:xs) cmds) e = let cmd = Assign Simple x e (Bool True)
+                             in eval (Fun xs (cmd:cmds))
+
+  run :: Command d -> Expr d -> a
+  run cmd = error "Handler error: can't run a command with arguments.\n"
+
+data Value a
   = Value { getValue :: a }
   | Error { getError :: String }
 
-instance Functor Eval where
+instance Functor Value where
   fmap f (Value a)   = Value (f a)
   fmap f (Error err) = Error err
 
-newtype Handler d m a = Handler { runHandler :: DebugInfo d => Info m d -> m (Eval a, Info m d) }
-
-evalHandler :: (DebugInfo d, Monad m) => Handler d m a -> Info m d -> m a
-evalHandler m s = runHandler m s >>= \ ~(a, _) -> case a of
-  Value x   -> return x
-  Error err -> error $ "Handler error: " ++ err ++ ".\n"
-{-# INLINE evalHandler #-}
+newtype Handler d m a = Handler
+  {
+    runHandler :: DebugInfo d => Program.Handler.State m d ->
+                                 m (Value a, Program.Handler.State m d)
+  }
 
 instance Functor m => Functor (Handler d m) where
   fmap f (Handler m) = Handler $ \ s -> fmap (\ ~(a, s') -> (f <$> a, s')) (m s)
@@ -127,7 +151,7 @@ instance MonadIO m => MonadIO (Handler d m) where
   liftIO = lift . liftIO
   {-# INLINE liftIO #-}
 
-instance Monad m => MonadState (Info m d) (Handler d m) where
+instance Monad m => MonadState (Program.Handler.State m d) (Handler d m) where
   state f = Handler $ \ s -> let ~(a,s') = f s in return (Value a, s')
   get = state $ \ s -> (s, s)
   put s = state $ const ((), s)
@@ -136,109 +160,107 @@ instance Monad m => MonadState (Info m d) (Handler d m) where
 -- Functions
 
 getVal :: Monad m => Var -> Handler d m (Maybe (Expr d))
-getVal x = get >>= \info -> return (M.lookup x (vals info))
+getVal x = get >>= \s -> return (fst <$> M.lookup x (vals s))
 
-setVal :: Monad m => Int -> Expr d -> Handler d m (Expr d)
-setVal x v = modify (\info -> info {vals = M.insert x v (vals info)}) >> return v
+setVal :: Monad m => Var -> Expr d -> Handler d m (Expr d)
+setVal x e = modify (\s -> s {vals = M.insert x (e, \_ -> return ()) (vals s)})
+  >> return e
 
-getPtr :: Monad m => Var -> Handler d m (Maybe (Expr d, Swap m d))
-getPtr x = get >>= \info -> case (M.lookup x (vals info), M.lookup x (swaps info)) of
-  (Just e, Just sw) -> return (Just (e,sw))
-  _                 -> return Nothing
+getPtr :: Monad m => Var -> Handler d m (Maybe (Expr d, Subst m d))
+getPtr x = fmap (M.lookup x . vals) get
 
-setPtr :: Monad m => Int -> Expr d -> Swap m d -> Handler d m (Expr d)
-setPtr x v sw = modify (\info -> info { vals = M.insert x v (vals info),
-                                        swaps = M.insert x sw (swaps info) }) >> return v
+setPtr :: Monad m => Int -> Expr d -> Subst m d -> Handler d m (Expr d)
+setPtr x e sw = modify (\s -> s { vals = M.insert x (e,sw) (vals s) }) >> return e
 
 putError :: Monad m => forall a . String -> Handler d m a
 putError str = Handler $ \ s -> return (Error str, s)
 
 
-eval :: (DebugInfo d, Monad m) => Expr d -> Handler d m (Expr d)
+evalI :: (DebugInfo d, Monad m) => Expr d -> Handler d m (Expr d)
 
-eval (Var i) = getVal i >>= \case
+evalI (Var i) = getVal i >>= \case
   Just x  -> return x
   Nothing -> putError "a variable is not initialized"
 
-eval (Ptr _ _) = putError "can't take a pointer in the evaluating mode"
+evalI (Ptr _ _) = putError "can't take a pointer in the evaluating mode"
 
-eval (Ref i e) = eval e >>= setVal i
+evalI (Ref i e) = evalI e >>= setVal i
 
-eval x@(Sym _) = return x
+evalI x@(Sym _) = return x
 
-eval x@(Int _) = return x
+evalI x@(Int _) = return x
 
-eval Any = putError "can't evaluate any expression"
+evalI Any = putError "can't evaluate any expression"
 
-eval AnySeq = putError "can't evaluate any sequence of expressions"
+evalI AnySeq = putError "can't evaluate any sequence of expressions"
 
-eval x@(Bool _) = return x
+evalI x@(Bool _) = return x
 
-eval (Equal x y) = Bool <$> liftM2 (==) (eval x) (eval y)
+evalI (Equal x y) = Bool <$> liftM2 (==) (evalI x) (evalI y)
 
-eval (NEqual x y) = Bool <$> liftM2 (/=) (eval x) (eval y)
+evalI (NEqual x y) = Bool <$> liftM2 (/=) (evalI x) (evalI y)
 
-eval (In x y) = eval x >>= \ex -> eval y >>= \case
+evalI (In x y) = evalI x >>= \ex -> evalI y >>= \case
   (Alt   ey) -> return (Bool (ex `elem` ey))
   (Tuple ey) -> return (Bool (ex `elem` ey)) -- tuples are handled as lists
   (List  ey) -> return (Bool (ex `elem` ey))
   (Set   ey) -> return (Bool (ex `elem` ey)) -- sets are handled as lists
   _          -> putError "a wrong in-expression"
 
-eval (Not x) = Bool . Prelude.not <$> evalB x
+evalI (Not x) = Bool . Prelude.not <$> evalB x
 
-eval (And xs) = Bool . and <$> mapM evalB xs
+evalI (And xs) = Bool . and <$> mapM evalB xs
 
-eval (Or xs) = Bool . or <$> mapM evalB xs
+evalI (Or xs) = Bool . or <$> mapM evalB xs
 
-eval (IfElse c t f) = evalB c >>= \case
-  True  -> eval t
-  False -> eval f
+evalI (IfElse c t f) = evalB c >>= \case
+  True  -> evalI t
+  False -> evalI f
 
-eval (CaseOf e []) = putError "can't evaluate an empty case-expression"
-eval (CaseOf e ((p,c):cmds)) = (ident e p >> eval c) <|> eval (CaseOf e cmds)
+evalI (CaseOf e []) = putError "can't evaluate an empty case-expression"
+evalI (CaseOf e ((p,c):cmds)) = (ident e p >> evalI c) <|> evalI (CaseOf e cmds)
 
-eval (Term (T x)) = Term . T <$> eval x
-eval (Term (x :> xs)) = Term <$> liftM2 (:>) (eval x)
-  (fmap getTerm <$> mapM (eval . Term) xs)
-eval (Term (x :>> y)) = Term <$> liftM2 (:>) (eval x) (map getTerm . getList <$> eval y)
+evalI (Term (T x)) = Term . T <$> evalI x
+evalI (Term (x :> xs)) = Term <$> liftM2 (:>) (evalI x)
+  (fmap getTerm <$> mapM (evalI . Term) xs)
+evalI (Term (x :>> y)) = Term <$> liftM2 (:>) (evalI x) (map getTerm . getList <$> evalI y)
 
-eval (Alt xs)   = Alt   <$> mapM eval xs
+evalI (Alt xs)   = Alt   <$> mapM evalI xs
 
-eval (Tuple xs) = Tuple <$> mapM eval xs
+evalI (Tuple xs) = Tuple <$> mapM evalI xs
 
-eval (List xs)  = List  <$> mapM eval xs
+evalI (List xs)  = List  <$> mapM evalI xs
 
-eval (Set xs)   = Set   <$> mapM eval xs
+evalI (Set xs)   = Set   <$> mapM evalI xs
 
-eval (Call f args) = evalCall f args
+evalI (Call f args) = evalCall f args
 
-eval (Fun [] cs) = run cs (return NONE)
-eval (Fun _ _) = putError "can't evaluate a function definition"
+evalI (Fun [] cs) = runI cs (return NONE)
+evalI (Fun _ _) = putError "can't evaluate a function definition"
 
-eval NONE = putError "can't evaluate an undefined expression"
+evalI NONE = putError "can't evaluate an undefined expression"
 
 evalB :: (DebugInfo d, Monad m) => Expr d -> Handler d m Bool
-evalB e = eval e >>= \case
+evalB e = evalI e >>= \case
   Bool c -> return c
   _      -> putError "a wrong Boolean expression"
 
 evalL :: (DebugInfo d, Monad m) => Expr d -> Handler d m [Expr d]
-evalL e = eval e >>= \case
+evalL e = evalI e >>= \case
   List l -> return l
   _      -> putError "a wrong list expression"
 
 evalCall :: (DebugInfo d, Monad m) => Expr d -> [Expr d] -> Handler d m (Expr d)
 evalCall ff@(Sym (IL s)) as = case getBuiltInFunc s of
   Just (BuiltInFunc n f) | n > length as -> return $ Call ff as
-                         | n == length as -> mapM eval as >>= f
-                         | otherwise -> mapM eval af >>= f >>= \x -> return $ Call x al
+                         | n == length as -> mapM evalI as >>= f
+                         | otherwise -> mapM evalI af >>= f >>= \x -> return $ Call x al
                          where (af,al) = splitAt n as
   Nothing -> putError "call a nonexisting built-in function"
 evalCall (Var i) as = getVal i >>= \case
   Just f  -> evalCall f as
   Nothing -> putError "can't call an undefined function"
-evalCall (Fun [] cmds) [] = run cmds (putError "the function value is undefined")
+evalCall (Fun [] cmds) [] = runI cmds (putError "the function value is undefined")
 evalCall (Fun (x:xs) cmds) (a:as) = let c = Assign Simple x a NONE
                                   in evalCall (Fun xs (c:cmds)) as
 evalCall e as = putError "call an undefined function"
@@ -246,7 +268,7 @@ evalCall e as = putError "call an undefined function"
 ident :: (DebugInfo d, Monad m) => Expr d -> Expr d -> Handler d m (Expr d)
 ident x y = identI x (\_ -> return ()) y (\_ -> return ())
 
-identI :: (DebugInfo d, Monad m) => Expr d -> Swap m d -> Expr d -> Swap m d -> Handler d m (Expr d)
+identI :: (DebugInfo d, Monad m) => Expr d -> Subst m d -> Expr d -> Subst m d -> Handler d m (Expr d)
 
 identI (Alt []) lsw y rsw = empty
 identI (Alt (x:xs)) lsw y rsw =
@@ -279,7 +301,7 @@ identI (CaseOf e ((p,x):cs)) lsw y rsw =
   identI (CaseOf e cs) (\ ~(CaseOf a as) -> lsw $ CaseOf a ((p,x):as)) y rsw
 identI x lsw (CaseOf e cs) rsw = identI (CaseOf e cs) rsw x lsw
 
-identI x@(Call _ _) lsw y rsw = eval x >>= \e -> ident e y
+identI x@(Call _ _) lsw y rsw = evalI x >>= \e -> ident e y
 identI x lsw y@(Call _ _) rsw = identI y rsw x lsw
 
 identI (Sym x) _ (Sym y) _ = if x == y
@@ -327,13 +349,13 @@ check e = evalB e >>= \case
   False -> putError "a condition is false"
 
 -- | Run a list of commands
-run :: (DebugInfo d, Monad m) => [Command d] -> Handler d m (Expr d) -> Handler d m (Expr d)
+runI :: (DebugInfo d, Monad m) => [Command d] -> Handler d m (Expr d) -> Handler d m (Expr d)
 
-run (Assign Simple l r c : cmds) _ =
-  ident l r >>= \ e -> check c >> run cmds (return e)
+runI (Assign Simple l r c : cmds) _ =
+  ident l r >>= \ e -> check c >> runI cmds (return e)
 
-run (Assign Iterate l r c : cmds) _ =
-  eval r >>= ident l >>= \ e -> check c >> run cmds (return e)
+runI (Assign Iterate l r c : cmds) _ =
+  evalI r >>= ident l >>= \ e -> check c >> runI cmds (return e)
 
 {- Handle an assignment command of the form 'p <- g | c', where
  p is a program expression denoting a list of patterns;
@@ -341,20 +363,20 @@ run (Assign Iterate l r c : cmds) _ =
  c is a program expression denoting a condition.
 
 The program expressions p, g, c are evaluated as follows:
-'eval p' is a list of logical expressions in which some of leaves are program variables;
-'eval g' is a list of logical expressions;
-'eval c' is a logical constant true or false.
+'evalI p' is a list of logical expressions in which some of leaves are program variables;
+'evalI g' is a list of logical expressions;
+'evalI c' is a logical constant true or false.
 
 Note that we does not handle an assignment command of the form 'p = g | c', since it is equivalent to '[p] <- [g] | c'.
 
-We handle a command 'p <- g | c' as follows. First, we eval p as a list of expressions [p1,...,pn] and g as a list of logical expressions [g1,...,gm], and reduce 'p <- g | c' to '[p1,...,pn] <- [g1,...,gm] | c'. If n is less than or equal to m, we try to handle '[p1,...,pn] <- [g1,...,gm] | c' in the following steps:
+We handle a command 'p <- g | c' as follows. First, we evalI p as a list of expressions [p1,...,pn] and g as a list of logical expressions [g1,...,gm], and reduce 'p <- g | c' to '[p1,...,pn] <- [g1,...,gm] | c'. If n is less than or equal to m, we try to handle '[p1,...,pn] <- [g1,...,gm] | c' in the following steps:
 1. if n > 0, match p1 with g1 and handle '[p2,...,pn] <- [g2,...,gm] | c';
-2. if n = 0, eval c;
+2. if n = 0, evalI c;
 3. handle '[p1,...,pn] <- [g2,...,gm] | c'.
 -}
-run (Assign Select (List ls) r c : cmds) _ =
+runI (Assign Select (List ls) r c : cmds) _ =
   evalL r >>= f ls >>= \ es ->
-  check c >> run cmds (return $ List es)
+  check c >> runI cmds (return $ List es)
   where
     f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Handler d m [Expr d]
     f [] _ = empty
@@ -368,21 +390,21 @@ run (Assign Select (List ls) r c : cmds) _ =
  c is a program expression denoting a condition.
 
 The program expressions p, g, c are evaluated as follows:
-'eval p' is a list of logical expressions in which some of leaves are program variables;
-'eval g' is a list of logical expressions;
-'eval c' is a logical constant true or false;
+'evalI p' is a list of logical expressions in which some of leaves are program variables;
+'evalI g' is a list of logical expressions;
+'evalI c' is a logical constant true or false;
 
-We handle a command 'p ~= g | c' as follows. First, we eval p as a list of expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and reduce 'p ~= g | c' to '[p1,...,pn] ~= [g1,...,gm] | c'. If n is less than or equal to m+1 and there is at most one pi = p@__, where __ is a program sequence-variable, we try to handle '[p1,...,pn] ~= [g1,...,gm] | c' in the following steps:
+We handle a command 'p ~= g | c' as follows. First, we evalI p as a list of expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and reduce 'p ~= g | c' to '[p1,...,pn] ~= [g1,...,gm] | c'. If n is less than or equal to m+1 and there is at most one pi = p@__, where __ is a program sequence-variable, we try to handle '[p1,...,pn] ~= [g1,...,gm] | c' in the following steps:
 1. if 'p1 != p@__', match p1 with g1 and handle '[p2,...,pn] ~= [g2,...,gm] | c';
 2. if 'p1 = p@__' and n > 1, match p2 with g1 and handle '[p1,p3,...,pn] ~= [g2,...,gm] | c';
-3. if 'p1 = p@__' and n = 1, assing p the list [g1,...,gm] and eval c;
-4. if n = 0, eval c;
+3. if 'p1 = p@__' and n = 1, assing p the list [g1,...,gm] and evalI c;
+4. if n = 0, evalI c;
 5. handle '[p1,...,pn] ~= [g2,...,gm,g1] | c'.
 -}
-run (Assign Unord (List ls) r c : cmds) _ =
+runI (Assign Unord (List ls) r c : cmds) _ =
   evalL r >>= \ rs -> let n = length rs in
   guard (length ls <= n + 1) >> f ls rs n >>= \ es ->
-  check c >> run cmds (return $ List es)
+  check c >> runI cmds (return $ List es)
   where
     f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Int -> Handler d m [Expr d]
     f [] _ n = empty
@@ -398,14 +420,14 @@ run (Assign Unord (List ls) r c : cmds) _ =
  c is a program expression denoting a condition.
 
 The program expressions p, g, c are evaluated as follows:
-if p is assigned, 'eval p' is a list of logical expressions;
-'eval g' is a list of logical expressions;
-'eval c' is a logical constant true or false;
+if p is assigned, 'evalI p' is a list of logical expressions;
+'evalI g' is a list of logical expressions;
+'evalI c' is a logical constant true or false;
 
-We handle a command 'p << g | c' as follows. First, we eval p as a list of logical expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and c as a logical constant C. If C is true, we assign p the new value [p1,...,pn,g1,...,gm].
+We handle a command 'p << g | c' as follows. First, we evalI p as a list of logical expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and c as a logical constant C. If C is true, we assign p the new value [p1,...,pn,g1,...,gm].
 -}
-run (Assign Append (Var i) r@(List rs) c : cmds) _ =
-  check c >> getVal i >>= f >>= (setVal i . List) >>= run cmds . return
+runI (Assign Append (Var i) r@(List rs) c : cmds) _ =
+  check c >> getVal i >>= f >>= (setVal i . List) >>= runI cmds . return
   where
     f = \case (Just ~(List ls)) -> return (ls ++ rs); Nothing -> return rs
 
@@ -415,11 +437,11 @@ do
   branch commands
 next commands
 -}
-run (Branch c b : cmds) res =
+runI (Branch c b : cmds) res =
   -- evaluate the condition
   evalB c >>= \case
-    True  -> run b res   -- run the branch commands if the condition holds
-    False -> run cmds res  -- run the next commands otherwise
+    True  -> runI b res   -- runI the branch commands if the condition holds
+    False -> runI cmds res  -- runI the next commands otherwise
 
 {- Handle a switch command of the form:
 case e | c
@@ -430,15 +452,15 @@ pn | cn
   commands of the lase case
 next commands
 -}
-run (Switch e c cs : cmds) _ =
-  check c >> f cs >>= run cmds . return
+runI (Switch e c cs : cmds) _ =
+  check c >> f cs >>= runI cmds . return
   where
-    f ((xp,xc,xb):xs) = (ident xp e >>= \ x -> check xc >> run xb (return x)) <|> f xs
+    f ((xp,xc,xb):xs) = (ident xp e >>= \ x -> check xc >> runI xb (return x)) <|> f xs
     f [] = empty
 
 -- Handle an acting command
-run (Apply a c : cmds) _ =
-  check c >> eval a >>= run cmds . return
+runI (Apply a c : cmds) _ =
+  check c >> evalI a >>= runI cmds . return
 
 -- Handle an empty command
-run [] res = res
+runI [] res = res

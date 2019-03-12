@@ -25,9 +25,11 @@ import           Control.Monad.State
 import qualified Data.Map            as Map
 
 -- Internal imports
+import           DebugInfo
 import           Database
 import           LSymbol
 import           Program
+import           Program.Handler
 
 ------------------------------------------------------------------------------------------
 -- Data and type declaration
@@ -38,9 +40,10 @@ type Global = StateT InfoS IO
 -- | Type of global informational structure
 data InfoS = Info
   {
-    lsymbols :: LSymbols, -- ^ database of logical symbols
-    programs :: ProgramsS, -- ^ database of programs
-    pvars    :: PVars     -- ^ database of program variables
+    lsymbols     :: LSymbols,         -- ^ database of logical symbols
+    programs     :: ProgramsS,        -- ^ database of programs
+    pvars        :: PVars,            -- ^ database of program variables
+    handlerState :: Program.Handler.State Global SrcInfo
   }
 
 ------------------------------------------------------------------------------------------
@@ -58,6 +61,10 @@ instance Program.Vars Global where
   getPVars = pvars <$> get
   setPVars db = modify (\info -> info { pvars = db })
 
+instance Program.Handler.Base Global SrcInfo where
+  getState = handlerState <$> get
+  setState s = modify (\info -> info { handlerState = s })
+
 instance NameSpace Global
 
 ------------------------------------------------------------------------------------------
@@ -65,4 +72,4 @@ instance NameSpace Global
 
 -- | Make somesing in monad Global
 make :: Global a -> IO a
-make = (`evalStateT` Info initLSymbols initPrograms initPVars)
+make = (`evalStateT` Info initLSymbols initPrograms initPVars initState)

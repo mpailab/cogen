@@ -27,7 +27,7 @@ test 1 = do
     let out_file = "test/specs/1.out"
     prog_str <- liftIO $ readFile in_file
     e :: ExprS <- parse prog_str in_file
-    let f = (handle :: ExprS -> ExprS -> Global ExprS) e
+    let f = (eval :: ExprS -> ExprS -> Global ExprS) e
     liftIO . writeFile out_file =<< write =<< f =<< f NONE
     return True
 
