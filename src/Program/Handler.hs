@@ -123,8 +123,8 @@ instance Monad m => Alternative (Handler d m) where
   {-# INLINE (<|>) #-}
 
 instance Monad m => Monad (Handler d m) where
-  m >>= k  = Handler $ runHandler m >=> \ case
-    (Value a, s') -> runHandler (k a) s'
+  m >>= k  = Handler $ \s -> runHandler (fmap k m) s >>= \case
+    (Value n, s') -> runHandler n s'
     (Error err, s') -> return (Error err, s')
   {-# INLINE (>>=) #-}
 
@@ -235,7 +235,7 @@ evalI (Set xs)   = Set   <$> mapM evalI xs
 
 evalI (Call f args) = evalCall f args
 
-evalI (Fun [] cs) = runI cs (return NONE)
+evalI x@(Fun [] cs) = evalCall x []
 evalI (Fun _ _) = putError "can't evaluate a function definition"
 
 evalI NONE = putError "can't evaluate an undefined expression"
@@ -260,7 +260,7 @@ evalCall ff@(Sym (IL s)) as = case getBuiltInFunc s of
 evalCall (Var i) as = getVal i >>= \case
   Just f  -> evalCall f as
   Nothing -> putError "can't call an undefined function"
-evalCall (Fun [] cmds) [] = runI cmds (putError "the function value is undefined")
+evalCall (Fun [] cmds) [] = get >>= \s -> runI cmds (putError "the function value is undefined") >>= \e -> put s >> return e
 evalCall (Fun (x:xs) cmds) (a:as) = let c = Assign Simple x a NONE
                                   in evalCall (Fun xs (c:cmds)) as
 evalCall e as = putError "call an undefined function"
