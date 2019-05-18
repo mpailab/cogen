@@ -1,9 +1,9 @@
+{-# LANGUAGE DeriveFoldable       #-}
+{-# LANGUAGE DeriveFunctor        #-}
 {-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE PatternSynonyms      #-}
 {-# LANGUAGE RankNTypes           #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE DeriveFunctor        #-}
-{-# LANGUAGE DeriveFoldable       #-}
-{-# LANGUAGE PatternSynonyms      #-}
 {-|
 Module      : Expr
 Description : Data types of expressions in the language Coral
@@ -21,6 +21,7 @@ module Expr
       Command(..),
       Expr'(..),
       Expr(..),
+      Label,
       TExpr,
       getTerm,
       getList,
@@ -57,17 +58,18 @@ module Expr
       pattern Call,
       pattern Fun,
       pattern ClassDef,
+      pattern Void,
       pattern NONE
     )
 where
 
 -- External imports
-import qualified Data.Map as M
+import qualified Data.Map  as M
 
 -- Internal imports
+import           DebugInfo
 import           LSymbol
 import           Term
-import           DebugInfo
 
 ------------------------------------------------------------------------------------------
 -- Data types and clases declaration
@@ -125,6 +127,7 @@ data Expr' d
   -- Functional expressions:
   | Call' (Expr d) [Expr d]   -- ^ partial function call
   | Fun' [Expr d] [Command d] -- ^ partial function definiton
+  | Void'
 
   | Class (M.Map Var (Expr d))   -- ^ class instance
   | ClassDef' [Var] [Command d] -- ^ class definition; evaluated to Class
@@ -163,6 +166,7 @@ pattern List     :: Monoid d => [Expr d] -> Expr d
 pattern Set      :: Monoid d => [Expr d] -> Expr d
 pattern Call     :: Monoid d => Expr d -> [Expr d] -> Expr d
 pattern Fun      :: Monoid d => [Expr d] -> [Command d] -> Expr d
+pattern Void     :: Monoid d => Expr d
 pattern NONE     :: Monoid d => Expr d
 pattern ClassDef :: Monoid d => [Var] -> [Command d] -> Expr d
 
@@ -253,6 +257,9 @@ pattern Fun x y <- Expr (Fun' x y) _ where
 pattern ClassDef x y <- Expr (ClassDef' x y) _ where
   ClassDef x y = Expr (ClassDef' x y) mempty
 
+pattern Void <- Expr Void' _ where
+  Void = Expr Void' mempty
+
 pattern NONE <- Expr NONE' _ where
   NONE = Expr NONE' mempty
 
@@ -261,65 +268,76 @@ getList (List x) = x
 
 -- | type of assigning
 data Assign
-  = Simple  -- ^ match a pattern with en expression (left = right | cond)
+  = Simple  -- ^ match a pattern with en expression (left = right)
   | Select  -- ^ match patterns with list elements ([l1,...,lN] <- right)
   | Iterate -- ^ match a pattern with a result of iterating expression (left <= right)
-  | ReplLoc -- ^ same as Simple except all variables in left part are new (let left = right | cond)
+  | ReplLoc -- ^ same as Simple except all variables in left part are new (let left = right)
   | Replace -- ^ ??? same as Simple except all existing variables in left part are replaced with new values
   | Unord   -- ^ match list pattern with list of elements in any order (left ~= right)
   | Append  -- ^ appends right part to variable (left << right)
   deriving (Eq, Ord)
 
 instance Show Assign where
-  show Simple = " = "
-  show Select = " <- "
-  show Unord  = " ~= "
-  show Append = " << "
+  show Simple  = " = "
+  show Select  = " <- "
+  show Unord   = " ~= "
+  show Append  = " << "
   show Replace = " := "
   show ReplLoc = " =< "
+
+type Label = Int
 
 -- | Type of commands
 data Command d
 
-  -- | Assign values to undefined variables
-  = Assign
+  -- | Applies a function
+  = Apply (Expr d)
+
+  -- | Assigns values to undefined variables
+  | Assign
     {
-      atype :: Assign, -- ^ type of assigning
-      left  :: Expr d,   -- ^ left part of assigning
-      right :: Expr d,   -- ^ right part of assigning
-      cond  :: Expr d   -- ^ condition of assigning
+      atype :: Assign,  -- ^ type of assigning
+      left  :: Expr d,  -- ^ left part of assigning
+      right :: Expr d   -- ^ right part of assigning
     }
 
-  -- | Branch to a commands sequence
-  | Branch
-    {
-      cond   :: Expr d,      -- ^ condition of branching
-      branch :: [Command d]  -- ^ commands sequence
-    }
+  -- | Performs a commands sequence
+  | Branch [Command d]
 
-  -- | Switch to a commands sequence
+  -- | Breaks all generators until a label
+  | Break Label
+
+  -- | Halts function computation
+  | Exit
+
+  -- | Checks a condition
+  | Guard (Expr d)
+
+  -- | Branches to a commands sequence with respect to condition
+  | IfBlock (Expr d) [Command d] [Command d]
+
+  -- | Imports a module
+  | Import String
+
+  -- | Sets a label
+  | Label Label
+
+  -- | Returns value and halts function computation
+  | Return (Expr d)
+
+  -- | Switches to a commands sequence
   | Switch
     {
-      expr  :: Expr d,              -- ^ expression of switching
-      cond  :: Expr d,              -- ^ condition of switching
-      cases :: [(Expr d, Expr d, [Command d])] -- ^ list of cases (p,c,f), where
-                                         -- ^ p is a pattern of the case
-                                         -- ^ c is a condition of the case
-                                         -- ^ f is a commands sequence of the case
+      expr  :: Expr d,                            -- ^ expression of switching
+      cases :: [(Expr d, [(Expr d, [Command d])])] -- ^ list of cases (p,[(c,f)]), where
+                                                  -- ^ p is a pattern of the case
+                                                  -- ^ c is a condition of the case
+                                                  -- ^ f is a command sequence of the case
     }
 
-  -- | Apply a function
-  | Apply
-    {
-      func :: Expr d,  -- ^ function
-      cond :: Expr d   -- ^ condition of applying
-    }
+  | When (Expr d) (Command d)
 
-  -- | Return statement or NONE, halts function computation
-  | Return { expr :: Expr d }
-
-  -- | generate next value in generating function
-  | Yield  { expr :: Expr d }
-  | Import String
+  -- | Generates next value in generating function
+  | Yield (Expr d)
 
   deriving (Eq, Ord, Show, Functor, Foldable)

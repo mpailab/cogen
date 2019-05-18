@@ -18,27 +18,27 @@ Portability : POSIX
 module Program.Handler
     (
       -- exports
-      Program.Handler.Base,
+      Base,
       eval,
       getState,
       initState,
       run,
       setState,
-      Program.Handler.State(..)
+      State(..)
     )
 where
 
 -- External imports
 import           Control.Applicative
-import           Control.Monad.State
+import           Control.Monad.State hiding (State)
 import           Data.Foldable
 import qualified Data.Map            as M
 
 -- Internal imports
 import           DebugInfo
 import           Expr
-import           LSymbol
-import           Program
+import           LSymbol             hiding (Base)
+import           Program             hiding (Base)
 import           Program.BuiltIn
 import           Term
 
@@ -54,48 +54,55 @@ newtype State m d = State
 
 -- | Base handler class
 class (Monad m, DebugInfo d) => Base m d where
-  getState :: m (Program.Handler.State m d)
-  setState :: Program.Handler.State m d -> m ()
+  getState :: m (State m d)
+  setState :: State m d -> m ()
 
 -- | Init the handler state
-initState :: (Monad m, DebugInfo d) => Program.Handler.State m d
-initState = Program.Handler.State M.empty
+initState :: (Monad m, DebugInfo d) => State m d
+initState = State M.empty
 
 class DebugInfo d => Handle d a where
   eval :: Expr d -> a
-  run  :: Command d -> a
+  run  :: [Command d] -> a
 
-instance (DebugInfo d, Program.Handler.Base m d) => Handle d (m (Expr d)) where
+instance (DebugInfo d, Base m d) => Handle d (m (Expr d)) where
   eval :: Expr d -> m (Expr d)
   eval e = getState >>= runHandler (evalI e) >>= \ ~(a,s) -> case a of
     Value x   -> setState s >> return x
+    Goto _    -> error "Handler error: unexpected goto state.\n"
+    Next      -> error "Handler error: unexpected next state.\n"
     Error err -> error $ "Handler error: " ++ err ++ ".\n"
 
-  run :: Command d -> m (Expr d)
-  run cmd = getState >>= runHandler (runI [cmd] (return NONE)) >>= \ ~(a,s) -> case a of
+  run :: [Command d] -> m (Expr d)
+  run cmds = getState >>= runHandler (runI cmds) >>= \ ~(a,s) -> case a of
     Value x   -> setState s >> return x
+    Goto _    -> error "Handler error: unexpected goto state.\n"
+    Next      -> error "Handler error: unexpected next state.\n"
     Error err -> error $ "Handler error: " ++ err ++ ".\n"
 
 instance Handle d a => Handle d (Expr d -> a) where
   eval :: Expr d -> Expr d -> a
-  eval (Fun (x:xs) cmds) e = let cmd = Assign Simple x e (Bool True)
+  eval (Fun (x:xs) cmds) e = let cmd = Assign Simple x e
                              in eval (Fun xs (cmd:cmds))
 
-  run :: Command d -> Expr d -> a
-  run cmd = error "Handler error: can't run a command with arguments.\n"
+  run :: [Command d] -> Expr d -> a
+  run _ = error "Handler error: can't run commands with arguments.\n"
 
 data Value a
-  = Value { getValue :: a }
-  | Error { getError :: String }
+  = Value a
+  | Goto Label
+  | Next
+  | Error String
 
 instance Functor Value where
   fmap f (Value a)   = Value (f a)
+  fmap f (Goto l)    = Goto l
+  fmap f Next        = Next
   fmap f (Error err) = Error err
 
 newtype Handler d m a = Handler
   {
-    runHandler :: DebugInfo d => Program.Handler.State m d ->
-                                 m (Value a, Program.Handler.State m d)
+    runHandler :: DebugInfo d => State m d -> m (Value a, State m d)
   }
 
 instance Functor m => Functor (Handler d m) where
@@ -107,25 +114,31 @@ instance Monad m => Applicative (Handler d m) where
   {-# INLINE pure #-}
 
   Handler mf <*> Handler mx = Handler $ mf >=> \case
-    (Value f, s') -> mx s' >>= \case
-        (Value x, s'') -> return (Value (f x), s'')
-        (Error err, s'') -> return (Error err, s'')
-    (Error err, s') -> return (Error err, s')
+    (Value f, s)   -> mx s >>= \case
+      (Value x, s')   -> return (Value (f x), s')
+      (Goto l, s')    -> return (Goto l, s')
+      (Next, s')      -> return (Next, s')
+      (Error err, s') -> return (Error err, s')
+    (Goto l, s)    -> return (Goto l, s)
+    (Next, s)      -> return (Next, s)
+    (Error err, s) -> return (Error err, s)
   {-# INLINE (<*>) #-}
 
 instance Monad m => Alternative (Handler d m) where
-  empty = Handler $ \ s -> return (Error "an empty alternative", s)
+  empty = Handler $ \ s -> return (Next, s)
   {-# INLINE empty #-}
 
   Handler m <|> Handler n = Handler $ \ s -> m s >>= \ case
-    x@(Value _, _) -> return x
-    _              -> n s
+    (Next, _) -> n s
+    x         -> return x
   {-# INLINE (<|>) #-}
 
 instance Monad m => Monad (Handler d m) where
-  m >>= k  = Handler $ \s -> runHandler (fmap k m) s >>= \case
-    (Value n, s') -> runHandler n s'
-    (Error err, s') -> return (Error err, s')
+  m >>= k  = Handler $ runHandler (fmap k m) >=> \case
+    (Value n, s)   -> runHandler n s
+    (Goto l, s)    -> return (Goto l, s)
+    (Next, s)      -> return (Next, s)
+    (Error err, s) -> return (Error err, s)
   {-# INLINE (>>=) #-}
 
   return a = Handler $ \ s -> return (Value a, s)
@@ -135,12 +148,13 @@ instance Monad m => Monad (Handler d m) where
   {-# INLINE fail #-}
 
 instance Monad m => MonadPlus (Handler d m) where
-  mzero = Handler $ \ s -> return (Error "an empty alternative", s)
-  {-# INLINE mzero #-}
+  mzero = Handler $ \ s -> return (Next, s)
+  {-# INLINE mzero  #-}
 
   Handler m `mplus` Handler n = Handler $ \ s -> m s >>= \ case
-    x@(Value _, _) -> return x
-    _              -> n s
+    (Value _, _) -> n s
+    (Next, _)    -> n s
+    x            -> return x
   {-# INLINE mplus #-}
 
 instance MonadTrans (Handler d) where
@@ -151,10 +165,28 @@ instance MonadIO m => MonadIO (Handler d m) where
   liftIO = lift . liftIO
   {-# INLINE liftIO #-}
 
-instance Monad m => MonadState (Program.Handler.State m d) (Handler d m) where
+instance Monad m => MonadState (State m d) (Handler d m) where
   state f = Handler $ \ s -> let ~(a,s') = f s in return (Value a, s')
   get = state $ \ s -> (s, s)
   put s = state $ const ((), s)
+
+call :: Monad m => Handler d m a -> Handler d m a
+call = label 0
+{-# INLINE call #-}
+
+exit :: Monad m => Handler d m a
+exit = Handler $ \ s -> return (Goto 0, s)
+{-# INLINE exit #-}
+
+label l m = Handler $ runHandler m >=> \case
+  x@(Goto n, s')
+    | n == l    -> return (Next, s')
+    | otherwise -> return x
+  x -> return x
+{-# INLINE label #-}
+
+goto l = Handler $ \ s -> return (Goto l, s)
+{-# INLINE goto #-}
 
 ------------------------------------------------------------------------------------------
 -- Functions
@@ -260,9 +292,8 @@ evalCall ff@(Sym (IL s)) as = case getBuiltInFunc s of
 evalCall (Var i) as = getVal i >>= \case
   Just f  -> evalCall f as
   Nothing -> putError "can't call an undefined function"
-evalCall (Fun [] cmds) [] = get >>= \s -> runI cmds (putError "the function value is undefined") >>= \e -> put s >> return e
-evalCall (Fun (x:xs) cmds) (a:as) = let c = Assign Simple x a NONE
-                                  in evalCall (Fun xs (c:cmds)) as
+evalCall (Fun [] cmds) [] = get >>= \s -> call (runI cmds) >>= \e -> put s >> return e
+evalCall (Fun (x:xs) cmds) (a:as) = evalCall (Fun xs (Assign Simple x a:cmds)) as
 evalCall e as = putError "call an undefined function"
 
 ident :: (DebugInfo d, Monad m) => Expr d -> Expr d -> Handler d m (Expr d)
@@ -346,121 +377,70 @@ identLists (x:xs) lsw (y:ys) rsw =
 check :: (DebugInfo d, Monad m) => Expr d -> Handler d m ()
 check e = evalB e >>= \case
   True  -> return ()
-  False -> putError "a condition is false"
+  False -> empty
 
 -- | Run a list of commands
-runI :: (DebugInfo d, Monad m) => [Command d] -> Handler d m (Expr d) -> Handler d m (Expr d)
+runI :: (DebugInfo d, Monad m) => [Command d] -> Handler d m (Expr d)
 
-runI (Assign Simple l r c : cmds) _ =
-  ident l r >>= \ e -> check c >> runI cmds (return e)
+runI (Apply f : cmds) = evalI f >> runI cmds
 
-runI (Assign Iterate l r c : cmds) _ =
-  evalI r >>= ident l >>= \ e -> check c >> runI cmds (return e)
+runI (Assign Simple l r : cmds) = ident l r >> runI cmds
 
-{- Handle an assignment command of the form 'p <- g | c', where
- p is a program expression denoting a list of patterns;
- g is a program expression denoting a list of values;
- c is a program expression denoting a condition.
+runI (Assign Iterate l r : cmds) = evalI r >>= ident l >> runI cmds
 
-The program expressions p, g, c are evaluated as follows:
-'evalI p' is a list of logical expressions in which some of leaves are program variables;
-'evalI g' is a list of logical expressions;
-'evalI c' is a logical constant true or false.
-
-Note that we does not handle an assignment command of the form 'p = g | c', since it is equivalent to '[p] <- [g] | c'.
-
-We handle a command 'p <- g | c' as follows. First, we evalI p as a list of expressions [p1,...,pn] and g as a list of logical expressions [g1,...,gm], and reduce 'p <- g | c' to '[p1,...,pn] <- [g1,...,gm] | c'. If n is less than or equal to m, we try to handle '[p1,...,pn] <- [g1,...,gm] | c' in the following steps:
-1. if n > 0, match p1 with g1 and handle '[p2,...,pn] <- [g2,...,gm] | c';
-2. if n = 0, evalI c;
-3. handle '[p1,...,pn] <- [g2,...,gm] | c'.
+{-
+Handle an assignment command of the form 'p <- g', where
+p is a program expression denoting a list of patterns;
+g is a program expression denoting a list of values.
 -}
-runI (Assign Select (List ls) r c : cmds) _ =
-  evalL r >>= f ls >>= \ es ->
-  check c >> runI cmds (return $ List es)
+runI (Assign Select (List ls) r : cmds) = evalL r >>= f ls >> runI cmds
   where
-    f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Handler d m [Expr d]
+    f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Handler d m ()
     f [] _ = empty
-    f (x:xs) (y:ys) = do
-      guard (length xs <= length ys)
-      (ident x y >>= \ e -> (e:) <$> f xs ys) <|> f (x:xs) ys
+    f (x:xs) (y:ys) = guard (length xs <= length ys) >> (ident x y >> f xs ys) <|> f (x:xs) ys
 
-{- Handle an assignment command of the form 'p ~= g | c', where
- p is a program expression denoting a list of patterns;
- g is a program expression denoting a list of values;
- c is a program expression denoting a condition.
-
-The program expressions p, g, c are evaluated as follows:
-'evalI p' is a list of logical expressions in which some of leaves are program variables;
-'evalI g' is a list of logical expressions;
-'evalI c' is a logical constant true or false;
-
-We handle a command 'p ~= g | c' as follows. First, we evalI p as a list of expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and reduce 'p ~= g | c' to '[p1,...,pn] ~= [g1,...,gm] | c'. If n is less than or equal to m+1 and there is at most one pi = p@__, where __ is a program sequence-variable, we try to handle '[p1,...,pn] ~= [g1,...,gm] | c' in the following steps:
-1. if 'p1 != p@__', match p1 with g1 and handle '[p2,...,pn] ~= [g2,...,gm] | c';
-2. if 'p1 = p@__' and n > 1, match p2 with g1 and handle '[p1,p3,...,pn] ~= [g2,...,gm] | c';
-3. if 'p1 = p@__' and n = 1, assing p the list [g1,...,gm] and evalI c;
-4. if n = 0, evalI c;
-5. handle '[p1,...,pn] ~= [g2,...,gm,g1] | c'.
+{-
+Handle an assignment command of the form 'p ~= g', where
+p is a program expression denoting a list of patterns;
+g is a program expression denoting a list of values.
 -}
-runI (Assign Unord (List ls) r c : cmds) _ =
-  evalL r >>= \ rs -> let n = length rs in
-  guard (length ls <= n + 1) >> f ls rs n >>= \ es ->
-  check c >> runI cmds (return $ List es)
+runI (Assign Unord (List ls) r : cmds) = evalL r >>= \ rs -> let n = length rs in guard (length ls <= n + 1) >> f ls rs n >> runI cmds
   where
-    f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Int -> Handler d m [Expr d]
+    f :: (DebugInfo d, Monad m) => [Expr d] -> [Expr d] -> Int -> Handler d m (Expr d)
     f [] _ n = empty
-    f [Ref i AnySeq] ys n = setVal i (List ys) >>= \e -> return  [e]
+    f [Ref i AnySeq] ys n = setVal i (List ys)
     f (z@(Ref i AnySeq):xs) ys n = f (xs ++ [z]) ys n
-    f (x:xs) (y:ys) n = guard (length xs <= length ys) >>
-      ( (ident x y >>= \ e -> (e:) <$> f xs ys (length ys))
-        <|> f (x:xs) (ys ++ [y]) (n-1) )
+    f (x:xs) (y:ys) n = guard (length xs <= length ys) >> ( (ident x y >> f xs ys (length ys)) <|> f (x:xs) (ys ++ [y]) (n-1) )
 
-{-Handle an assignment command of the form 'p << g | c', where
- p is a program variable whose values are lists of logical expressions;
- g is a program expression denoting a list of values;
- c is a program expression denoting a condition.
-
-The program expressions p, g, c are evaluated as follows:
-if p is assigned, 'evalI p' is a list of logical expressions;
-'evalI g' is a list of logical expressions;
-'evalI c' is a logical constant true or false;
-
-We handle a command 'p << g | c' as follows. First, we evalI p as a list of logical expressions [p1,...,pn], g as a list of logical expressions [g1,...,gm], and c as a logical constant C. If C is true, we assign p the new value [p1,...,pn,g1,...,gm].
+{-
+Handle an assignment command of the form 'p << g', where
+p is a program variable whose values are lists of logical expressions;
+g is a program expression denoting a list of values.
 -}
-runI (Assign Append (Var i) r@(List rs) c : cmds) _ =
-  check c >> getVal i >>= f >>= (setVal i . List) >>= runI cmds . return
+runI (Assign Append (Var i) (List rs) : cmds) = (getVal i >>= f >>= (setVal i . List)) >> runI cmds
   where
     f = \case (Just ~(List ls)) -> return (ls ++ rs); Nothing -> return rs
 
-{- Handle a branch command of the form:
-if c
-do
-  branch commands
-next commands
--}
-runI (Branch c b : cmds) res =
-  -- evaluate the condition
-  evalB c >>= \case
-    True  -> runI b res   -- runI the branch commands if the condition holds
-    False -> runI cmds res  -- runI the next commands otherwise
+runI (Branch b : cmds) = get >>= \s -> runI b >> put s >> runI cmds
 
-{- Handle a switch command of the form:
-case e | c
-p1 | c1
-  commands of the first case
-...
-pn | cn
-  commands of the lase case
-next commands
--}
-runI (Switch e c cs : cmds) _ =
-  check c >> f cs >>= runI cmds . return
-  where
-    f ((xp,xc,xb):xs) = (ident xp e >>= \ x -> check xc >> runI xb (return x)) <|> f xs
-    f [] = empty
+runI (Break l : cmds) = goto l
 
--- Handle an acting command
-runI (Apply a c : cmds) _ =
-  check c >> evalI a >>= runI cmds . return
+runI (Exit : cmds) = exit
 
--- Handle an empty command
-runI [] res = res
+runI (Guard c : cmds) = check c >> runI cmds
+
+runI (IfBlock c tb fb : cmds) = evalB c >>= (\case True -> runI tb; False -> runI fb) >> runI cmds
+
+runI (Import m : cmds) = putError "import does not supported"
+
+runI (Label l : cmds) = label l (runI cmds)
+
+runI (Return e : cmds) = return e >> exit
+
+runI (Switch e cs : cmds) = asum ((\(x,ys) -> ident x e >> asum ((\(y,z) -> check y >> runI z) <$> ys)) <$> cs) >> runI cmds
+
+runI (When c cmd : cmds) = evalB c >>= \cond -> when cond (void (runI [cmd])) >> runI cmds
+
+runI (Yield e : cmds) = return e >> runI cmds
+
+runI [] = return Void
